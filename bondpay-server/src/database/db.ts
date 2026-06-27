@@ -4,8 +4,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 
-console.log('[DB] DATABASE_URL loaded:', process.env.DATABASE_URL?.replace(/:([^:@]+)@/, ':****@') || 'UNDEFINED');
-
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 });
@@ -358,7 +356,6 @@ export const query = async (text: string, params?: any[]) => {
     // If the database connection failed, use our in-memory/JSON fallback DB!
     const isConnErr = err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message.includes('connect');
     if (isConnErr) {
-      console.warn('[DB] Connection error, falling back to JSON mock. Error:', err.code, err.message);
       // Route query to our mock schema
       const mockRes = runMockQuery(text, params);
       return mockRes as any;
