@@ -68,6 +68,9 @@ export const SendScreen = () => {
       setSysConfig(config);
     };
     loadConfigs();
+
+    // Request Bluetooth/BLE permissions early
+    BLEService.requestBluetoothPermissions();
   }, [userId]);
 
   const getDenominationsString = (bondsList: any[]) => {

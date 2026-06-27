@@ -46,6 +46,9 @@ export const ReceiveScreen = () => {
     };
     loadConfigs();
 
+    // Request BLE permissions early
+    BLEService.requestBluetoothPermissions();
+
     // Clean up BLE on unmount
     return () => {
       BLEService.stopPeripheralSession();
