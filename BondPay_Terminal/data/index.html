@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BondPay Terminal Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar glass-panel">
+            <div class="logo">
+                <div class="logo-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                </div>
+                <h1>Bond<span>Pay</span></h1>
+            </div>
+            <div class="sidebar-divider"></div>
+            <ul class="nav-links">
+                <li class="active" data-target="dashboard">
+                    <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+                    <span>Dashboard</span>
+                </li>
+                <li data-target="cards">
+                    <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" ry="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+                    <span>Cards</span>
+                </li>
+                <li data-target="transactions">
+                    <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="12 8 12 12 14 14"></polyline><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"></path></svg>
+                    <span>Transactions</span>
+                </li>
+                <li data-target="settings">
+                    <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                    <span>Settings</span>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <div class="terminal-status-badge">
+                    <span class="pulse-dot green"></span>
+                    <span>Offline Mode Active</span>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Main Content Area -->
+        <main class="content-area">
+            
+            <!-- Dashboard View -->
+            <section id="dashboard" class="view active-view">
+                <header>
+                    <div class="header-title">
+                        <h2>Overview</h2>
+                        <p class="header-subtitle">Real-time terminal operations monitoring</p>
+                    </div>
+                    <div class="station-badge-container">
+                        <span class="station-badge">Terminal ID: BP-01</span>
+                    </div>
+                </header>
+                
+                <div class="stats-grid">
+                    <div class="stat-card glass-panel">
+                        <div class="stat-header">
+                            <h3>Total Balance</h3>
+                            <div class="stat-icon-wrapper green-glow">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"></rect><circle cx="12" cy="12" r="2"></circle><path d="M6 12h.01M18 12h.01"></path></svg>
+                            </div>
+                        </div>
+                        <p id="total-balance" class="stat-value">NPR 0</p>
+                        <span class="stat-subtext">Sum of all loaded cards</span>
+                    </div>
+                    
+                    <div class="stat-card glass-panel">
+                        <div class="stat-header">
+                            <h3>Active Cards</h3>
+                            <div class="stat-icon-wrapper blue-glow">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                            </div>
+                        </div>
+                        <p id="total-cards" class="stat-value">0</p>
+                        <span class="stat-subtext">Registered user accounts</span>
+                    </div>
+                    
+                    <div class="stat-card glass-panel">
+                        <div class="stat-header">
+                            <h3>Transactions</h3>
+                            <div class="stat-icon-wrapper purple-glow">
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                            </div>
+                        </div>
+                        <p id="total-tx" class="stat-value">0</p>
+                        <span class="stat-subtext">Pending offline sync logs</span>
+                    </div>
+                </div>
+
+                <div class="quick-action glass-panel" id="payment-widget">
+                    <div class="payment-idle-state" id="payment-idle">
+                        <h2>Initiate Terminal Payment</h2>
+                        <p class="action-desc">Charge an offline BondPay card using the terminal's hardware RFID reader.</p>
+                        <div class="payment-form">
+                            <div class="input-container">
+                                <span class="currency-prefix">NPR</span>
+                                <input type="number" id="payment-amount" placeholder="0.00" min="1" step="any" />
+                            </div>
+                            <button id="btn-start-payment" class="btn-primary">
+                                <span>Start Payment</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="payment-active-state hidden" id="payment-active">
+                        <div class="pulse-ring-container">
+                            <div class="pulse-ring"></div>
+                            <div class="pulse-ring delay-1"></div>
+                            <div class="pulse-ring delay-2"></div>
+                            <div class="scanner-icon">
+                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"></path><path d="M12 9v8M9 12v3M15 12v3"></path><circle cx="12" cy="5" r="1"></circle></svg>
+                            </div>
+                        </div>
+                        <h2>Ready to Tap Card</h2>
+                        <p id="payment-status" class="status-message">Please hold your BondPay card close to the RFID reader.</p>
+                        <div class="payment-details-badge">
+                            <span>Amount: </span>
+                            <strong id="active-payment-amount">NPR 0</strong>
+                        </div>
+                        <button id="btn-cancel-payment" class="btn-secondary">
+                            <span>Cancel Payment</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Cards View -->
+            <section id="cards" class="view">
+                <header>
+                    <div class="header-title">
+                        <h2>Card Management</h2>
+                        <p class="header-subtitle">Register, modify, or remove user bonds</p>
+                    </div>
+                    <button id="btn-new-card" class="btn-primary btn-with-icon">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        <span>Register New Card</span>
+                    </button>
+                </header>
+                <div class="glass-panel table-container">
+                    <table id="cards-table">
+                        <thead>
+                            <tr>
+                                <th>Card UID</th>
+                                <th>Name</th>
+                                <th>Balance (NPR)</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Transactions View -->
+            <section id="transactions" class="view">
+                <header>
+                    <div class="header-title">
+                        <h2>Transaction History</h2>
+                        <p class="header-subtitle">Record of offline payments completed on this terminal</p>
+                    </div>
+                </header>
+                <div class="glass-panel table-container">
+                    <table id="transactions-table">
+                        <thead>
+                            <tr>
+                                <th>Tx ID</th>
+                                <th>Card UID</th>
+                                <th>User Name</th>
+                                <th>Amount</th>
+                                <th>Remaining Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Populated via JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Settings View -->
+            <section id="settings" class="view">
+                <header>
+                    <div class="header-title">
+                        <h2>Settings</h2>
+                        <p class="header-subtitle">Terminal hardware and local network configurations</p>
+                    </div>
+                </header>
+                <div class="glass-panel settings-panel">
+                    <div class="settings-group">
+                        <h3>Device Information</h3>
+                        <div class="settings-row">
+                            <span class="settings-label">Station Name</span>
+                            <span class="settings-val">BondPay Station BP-01</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Local IP Address</span>
+                            <span class="settings-val font-code">192.168.4.1</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">WiFi SSID</span>
+                            <span class="settings-val">BondPay Free WiFi (Open)</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">DNS Redirection Domains</span>
+                            <span class="settings-val">bonday.org, bondpay.org</span>
+                        </div>
+                        <div class="settings-row">
+                            <span class="settings-label">Firmware Version</span>
+                            <span class="settings-val font-code">v1.1.0-optimized</span>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-group danger-zone">
+                        <h3>Danger Zone</h3>
+                        <p class="danger-desc">Performing a factory reset deletes all local cards and transactions from LittleFS storage. Make sure offline transactions are synced before performing this action.</p>
+                        <button class="btn-danger" id="btn-factory-reset">Factory Reset Storage</button>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Modal for New Card Registration -->
+    <div id="card-modal" class="modal">
+        <div class="modal-content glass-panel">
+            <span class="close-btn">&times;</span>
+            <h2>Register Card</h2>
+            <p class="modal-desc">Add a new physical RFID bond to the terminal storage.</p>
+            
+            <div class="modal-form">
+                <label for="new-uid">Card UID</label>
+                <div class="scan-input-group">
+                    <input type="text" id="new-uid" placeholder="Tap card or enter UID" />
+                    <button class="btn-secondary scan-btn" id="btn-fetch-scan" title="Auto-scan from RFID Reader">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9"></path></svg>
+                        <span>Scan</span>
+                    </button>
+                </div>
+                
+                <label for="new-name">User Name</label>
+                <input type="text" id="new-name" placeholder="E.g., John Doe" />
+                
+                <label for="new-balance">Initial Balance (NPR)</label>
+                <div class="input-container">
+                    <span class="currency-prefix">NPR</span>
+                    <input type="number" id="new-balance" placeholder="0.00" min="0" />
+                </div>
+                
+                <button id="btn-save-card" class="btn-primary" style="width: 100%; margin-top: 15px;">
+                    <span>Save Card</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Navigation Bar for Mobile Views -->
+    <div class="mobile-nav glass-panel">
+        <div class="mobile-nav-item active" data-target="dashboard">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"></rect><rect x="14" y="3" width="7" height="5"></rect><rect x="14" y="12" width="7" height="9"></rect><rect x="3" y="16" width="7" height="5"></rect></svg>
+            <span>Home</span>
+        </div>
+        <div class="mobile-nav-item" data-target="cards">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2" ry="2"></rect><line x1="2" y1="10" x2="22" y2="10"></line></svg>
+            <span>Cards</span>
+        </div>
+        <div class="mobile-nav-item" data-target="transactions">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="12 8 12 12 14 14"></polyline><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z"></path></svg>
+            <span>Tx Logs</span>
+        </div>
+        <div class="mobile-nav-item" data-target="settings">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+            <span>Config</span>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
