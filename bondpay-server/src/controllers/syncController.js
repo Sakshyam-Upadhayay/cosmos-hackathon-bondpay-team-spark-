@@ -2,6 +2,17 @@ const { v4: uuidv4 } = require('uuid');
 const db = require('../config/database');
 const { verifyBondSignature } = require('../utils/serverKeys');
 const ed = require('@noble/ed25519');
+const crypto = require('crypto');
+
+// Polyfill esh256 / sha256 for noble-ed25519 compatibility on Node server
+ed.esh256 = (message) => {
+  const hash = crypto.createHash('sha256').update(message).digest();
+  return Promise.resolve(new Uint8Array(hash));
+};
+ed.sha256 = (message) => {
+  const hash = crypto.createHash('sha256').update(message).digest();
+  return Promise.resolve(new Uint8Array(hash));
+};
 
 async function syncBatch(req, res) {
   const client = await db.getClient();

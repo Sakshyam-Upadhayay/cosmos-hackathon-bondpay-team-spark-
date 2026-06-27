@@ -1,5 +1,16 @@
 const ed = require('@noble/ed25519');
 const config = require('../config/env');
+const crypto = require('crypto');
+
+// Polyfill esh256 / sha256 for noble-ed25519 compatibility on Node server
+ed.esh256 = (message) => {
+  const hash = crypto.createHash('sha256').update(message).digest();
+  return Promise.resolve(new Uint8Array(hash));
+};
+ed.sha256 = (message) => {
+  const hash = crypto.createHash('sha256').update(message).digest();
+  return Promise.resolve(new Uint8Array(hash));
+};
 
 let serverPrivateKeyBytes = null;
 let serverPublicKeyBytes = null;

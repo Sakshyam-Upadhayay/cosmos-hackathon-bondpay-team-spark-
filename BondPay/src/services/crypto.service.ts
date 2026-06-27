@@ -1,13 +1,17 @@
 import * as ed from '@noble/ed25519';
 import * as SecureStore from 'expo-secure-store';
 import CryptoJS from 'crypto-js';
-import { sha512 } from '@noble/hashes/sha2';
+import { sha512, sha256 } from '@noble/hashes/sha2';
 import { UserKeys } from '../types';
 import { SERVER_PUBLIC_KEY_HEX } from '../constants';
 
 // Set up the hash functions for noble-ed25519 to avoid crypto.subtle errors in React Native
 ed.etc.sha512Sync = (...msgs) => sha512(ed.etc.concatBytes(...msgs));
 ed.etc.sha512Async = (...msgs) => Promise.resolve(sha512(ed.etc.concatBytes(...msgs)));
+
+// Polyfill esh256 / sha256 typos in the legacy client code
+(ed as any).esh256 = (message: Uint8Array) => Promise.resolve(sha256(message));
+(ed as any).sha256 = (message: Uint8Array) => Promise.resolve(sha256(message));
 
 export async function generateUserKeyPair(userId: string): Promise<string> {
   const privateKey = ed.utils.randomPrivateKey();
