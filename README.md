@@ -18,7 +18,7 @@
 10. [Database Schema Architectures (Full SQL DDLs)](#10-database-schema-architectures-full-sql-ddls)
 11. [Web API Specifications (JSON Request/Response Schemas)](#11-web-api-specifications-json-requestresponse-schemas)
 12. [Frontend Services & Architectural Components](#12-frontend-services--architectural-components)
-13. [Hardware Terminal: BondPay Station (RFID Checkout)](#13-hardware-terminal-bondpay-station-rfid-checkout)
+13. [Hardware Terminal: BondPay Station (RFID & BLE Checkout)](#13-hardware-terminal-bondpay-station-rfid--ble-checkout)
 14. [Security Threat Model & Threat Matrix](#14-security-threat-model--threat-matrix)
 15. [Tech Stack & System Comparison Matrix](#15-tech-stack--system-comparison-matrix)
 16. [Open Research Problems](#16-open-research-problems)
@@ -33,7 +33,7 @@ BondPay is an offline-capable digital payment system designed for regions with u
 
 Traditional digital wallets operate on account-based synchronous models, requiring constant internet access to deduct balance from the sender and credit it to the receiver. BondPay shifts this paradigm to a **token-based model**, treating digital money as discrete, server-signed objects called **"Bonds"** (analogous to physical banknotes). 
 
-Users allocate a portion of their online balance to create offline bonds while connected to the internet. These bonds can then be transferred peer-to-peer face-to-face via optical QR codes, completely offline. The mathematical authenticity of the bonds and transaction authorization is verified offline by the receiver using asymmetric cryptographic signatures (Ed25519), while double-spending and ledger settlement are resolved when either party reconnects and syncs with the central server.
+Users allocate a portion of their online balance to create offline bonds while connected to the internet. During transactions, these bonds are transferred peer-to-peer face-to-face over an **ephemeral Bluetooth Low Energy (BLE) connection** initiated by scanning a lightweight QR code. The optical QR code contains only session initiation metadata, while the large payload of bonds and signatures is transferred invisibly and automatically via BLE without requiring manual device pairing. The mathematical authenticity of the bonds and transaction authorization is verified offline by the receiver using asymmetric cryptographic signatures (Ed25519), while double-spending and ledger settlement are resolved when either party reconnects and syncs with the central server.
 
 ---
 
@@ -57,6 +57,7 @@ Traditional wallets rely on database records stored exclusively in the cloud. Th
 BondPay models digital money as physical cash using modern cryptography:
 - **Server as the Central Bank**: The server signs and issues bonds using its private key, acting as an unforgeable digital watermark.
 - **Offline Asymmetric Verification**: Devices use the server's public key (hardcoded) to verify bonds, and the sender's public key to verify transaction authorization completely offline.
+- **BLE Ephemeral Transport**: Bluetooth Low Energy serves as the peer-to-peer data transport layer. BLE allows large transactional payloads (containing many bonds and digital signatures) to be transferred smoothly, avoiding the density limitations of QR codes.
 - **Bounded Fraud Window**: The system accepts a limited risk window (like EMV card offline floor limits) rather than pretending double-spending can be prevented offline, resolving duplicates post-sync and enforcing velocity limits (3000 NPR cap).
 
 ### 3.1 What BondPay Guarantees Offline
@@ -73,10 +74,10 @@ BondPay models digital money as physical cash using modern cryptography:
 ## 4. System Architecture & High-Level Data Flow
 
 The BondPay ecosystem consists of:
-1. **React Native (Expo) Mobile App**: Operates the offline wallet, camera/QR scanner, local SQLite ledger, and cryptographic engine.
+1. **React Native (Expo) Mobile App**: Operates the offline wallet, camera/QR scanner for session initiation, BLE engine for payload transfer, local SQLite ledger, and cryptographic engine.
 2. **Node.js (Express.js) Backend**: Serves as the central clearing house, verifying signatures, handling sync operations, and managing Supabase PostgreSQL.
 3. **Supabase (PostgreSQL) Database**: Authoritative cloud database storing user accounts, issued bonds, redemptions, and audit logs.
-4. **BondPay Station (ESP8266 Hardware Terminal)**: A standalone physical terminal for offline card/RFID verification in merchant environments.
+4. **BondPay Station (ESP8266/ESP32 Hardware Terminal)**: A standalone physical terminal for offline card/RFID/BLE verification in merchant environments.
 
 ### 4.1 Data Flow: Bond Issuance (Online)
 ```
@@ -100,29 +101,39 @@ User App (Online)                     Server                     Database
     │     with status = 'available'     │                           │
 ```
 
-### 4.2 Data Flow: Offline Payment (Optical QR Handshake)
+### 4.2 Data Flow: Offline Payment (QR-Assisted Ephemeral BLE Handshake)
 ```
-Receiver App (Offline)                                   Sender App (Offline)
-    │                                                            │
-    │  1. Generate Request QR                                    │
-    │     {receiverId, amount, mode: 'offline'}                  │
-    │───────────────────────────────────────────────────────────>│ (Scan)
-    │                                                            │
-    │                                                            │  2. Exact change bond selection
-    │                                                            │     (Subset-Sum Algorithm)
-    │                                                            │  3. Biometric confirmation
-    │                                                            │  4. Sign transaction payload
-    │                                                            │     with User Private Key
-    │                                                            │  5. Mark bonds as 'spent'
-    │                                                            │  6. Generate Payment QR
-    │<───────────────────────────────────────────────────────────│ (Scan)
-    │
-    │  7. Verify server signature on each bond
-    │  8. Verify sender signature on transaction
-    │  9. Verify sum of values match transaction total
-    │ 10. Check bond expiry (TTL) and duplicate txIds
-    │ 11. Save bonds as 'received_pending_sync'
-    │     and transaction as 'pending'
+Receiver App (Offline)                                             Sender App (Offline)
+    │                                                                      │
+    │  1. Start BLE Advertisement                                          │
+    │     with temp Service UUID                                           │
+    │  2. Generate Request QR                                              │
+    │     {receiverId, sessionUUID, nonce, timestamp}                      │
+    │─────────────────────────────────────────────────────────────────────>│ (Scan)
+    │                                                                      │
+    │                                                                      │  3. Discover BLE Advertiser matching
+    │                                                                      │     sessionUUID (from QR)
+    │                                                                      │  4. Establish Ephemeral BLE Connection
+    │                                                                      │     (No manual pairing required)
+    │                                                                      │  5. Subset-Sum Bond Selection
+    │                                                                      │  6. Sign transaction payload
+    │                                                                      │     with User Private Key
+    │  7. Receive Handshake Stage                                          │
+    │  8. Receive Metadata (amount, txId)                                  │
+    │  9. Send ACK (Metadata verified)                                     │
+    │ 10. Receive Bond Data (segmented packets)                            │
+    │ 11. Send ACK (Bonds received)                                        │
+    │ 12. Receive Digital Signatures                                       │
+    │ 13. Send ACK (Completed)                                             │
+    │<─────────────────────────────────────────────────────────────────────│
+    │                                                                      │
+    │  14. Close BLE Connection                                            │  15. Close BLE Connection
+    │  16. Verify server signature on each bond                            │  17. Mark bonds as 'spent'
+    │  17. Verify sender signature on transaction                          │
+    │  18. Verify sum of values match transaction total                    │
+    │  19. Check bond expiry (TTL) and duplicate txIds                     │
+    │  20. Save bonds as 'received_pending_sync'                           │
+    │      and transaction as 'pending'                                 │
 ```
 
 ---
@@ -146,25 +157,26 @@ BondPay adapts dynamically to the network status of both the sender and receiver
   1. Sender initiates payment via `/wallet/transfer-pending` providing the receiver's ID and amount.
   2. Server deducts the amount from the sender's online balance and generates a `pending_pickup` record containing a unique 6-character pickup code and an Ed25519 signature from the server.
   3. Sender's screen displays a Pickup QR.
-  4. Receiver scans the QR offline, verifying the server's signature locally to confirm the sender completed their step.
+  4. Receiver scans the QR offline, establishing a local session.
   5. The receiver stores the transaction locally with status `pending_pickup`.
   6. Once the receiver comes online, their background sync service sends a `POST /wallet/claim-pending` request. The server verifies the pickup and credits the receiver's online balance.
 
 ### 5.3 Mode 3: Offline → Online (Bond Transfer + Immediate Sync)
 - **Condition**: Sender is offline (using bonds); receiver is online.
 - **Mechanism**:
-  1. Receiver generates a Request QR (`mode: "offline"`).
-  2. Sender scans the QR, selects available local offline bonds matching the amount, hashes the transaction payload, and signs it using their private key. The app displays the Payment QR.
-  3. Receiver scans the Payment QR, verifying the server's signature on the bonds and the sender's signature on the transaction offline.
-  4. Because the receiver is online, the app immediately forwards the payload to `/transactions/sync`.
-  5. The server redeems the bonds, credits the receiver's online balance, and confirms the transaction.
+  1. Receiver generates a Request QR (`mode: "offline"`) containing BLE session metadata and starts BLE advertising.
+  2. Sender scans the QR, connects to the receiver via BLE automatically, selects available local offline bonds matching the amount, hashes the transaction payload, and signs it using their private key.
+  3. The sender's app sends the transaction payload over BLE using the staged data transfer protocol.
+  4. Receiver receives and verifies the payload offline.
+  5. Because the receiver is online, the app immediately forwards the payload to `/transactions/sync`.
+  6. The server redeems the bonds, credits the receiver's online balance, and confirms the transaction.
 
 ### 5.4 Mode 4: Offline → Offline (Bond Transfer + Deferred Sync)
 - **Condition**: Both sender and receiver are offline.
 - **Mechanism**:
-  1. Receiver generates a Request QR (`mode: "offline"`).
-  2. Sender scans, selects bonds, signs the transaction, and displays a Payment QR (using the multi-QR animated carousel if necessary).
-  3. Receiver scans and validates the cryptographic signatures offline.
+  1. Receiver generates a Request QR (`mode: "offline"`) containing BLE session metadata and starts BLE advertising.
+  2. Sender scans the QR, automatically initiates connection via BLE, selects bonds, signs the transaction, and sends the transaction payload over BLE.
+  3. Receiver validates the cryptographic signatures offline and disconnects.
   4. Receiver's app saves the transaction to SQLite as `pending_sync`, and marks the incoming bonds as `received_pending_sync`.
   5. Senders mark their sent bonds as `spent` locally.
   6. **Settlement**: When *either* party regains internet connection, their app syncs with `/transactions/sync`. The server processes the sync batch, finalizes the balance adjustments, and updates the transaction logs.
@@ -173,7 +185,7 @@ BondPay adapts dynamically to the network status of both the sender and receiver
 
 ## 6. Cryptographic Foundations & Handshake Protocol
 
-Security is implemented at the application layer, ensuring data integrity, non-repudiation, and authenticity without transport-level security (TLS) or real-time central validation.
+Security is implemented at the application layer, ensuring data integrity, non-repudiation, and authenticity without transport-level security (TLS) or real-time central validation. **Bluetooth Low Energy is treated strictly as an untrusted transport layer.** Cryptographic validation is completely independent of the BLE interface.
 
 ### 6.1 Asymmetric Signature Algorithm: Ed25519
 BondPay utilizes the Ed25519 elliptic curve digital signature algorithm over RSA-2048 and ECDSA P-256 due to:
@@ -220,7 +232,7 @@ Every transaction payload includes a cryptographically secure 128-bit random hex
 // In React Native:
 const nonce = Crypto.getRandomBytes(16).map(b => b.toString(16).padStart(2, '0')).join('');
 ```
-Since the `txId` is derived from hashing the payload (including `nonce` and `timestamp`), the transaction ID is unique. If an attacker replays the QR code, the receiver's SQLite DB rejects the duplicate `txId`, and the server rejects it via the `bond_redemptions` unique primary key constraint.
+Since the `txId` is derived from hashing the payload (including `nonce` and `timestamp`), the transaction ID is unique. If an attacker replays the payload transmitted over BLE, the receiver's SQLite DB rejects the duplicate `txId`, and the server rejects it via the `bond_redemptions` unique primary key constraint.
 
 ---
 
@@ -288,7 +300,7 @@ FUNCTION selectBondsExactChange(availableBonds, targetAmount):
 
 ### 7.3 Client Transaction Creation
 ```
-FUNCTION createTransaction(sender, receiverQR, selectedBonds):
+FUNCTION createTransaction(sender, receiverSessionMetadata, selectedBonds):
   FOR each bond IN selectedBonds:
     IF NOT verifyServerBondSignature(bond) THEN
       RETURN error("Invalid server signature on bond")
@@ -296,16 +308,16 @@ FUNCTION createTransaction(sender, receiverQR, selectedBonds):
       RETURN error("Bond already spent or unavailable")
 
   totalAmount = SUM(bond.value FOR bond in selectedBonds)
-  IF totalAmount != receiverQR.requestedAmount AND receiverQR.requestedAmount != 0 THEN
+  IF totalAmount != receiverSessionMetadata.requestedAmount AND receiverSessionMetadata.requestedAmount != 0 THEN
     RETURN error("Requested amount mismatch")
 
   nonce = generateSecureNonce()
   timestamp = currentUnixTimestamp()
   
-  txId = SHA256(sender.userId + receiverQR.receiverId + totalAmount.toString() + timestamp.toString() + nonce)
+  txId = SHA256(sender.userId + receiverSessionMetadata.receiverId + totalAmount.toString() + timestamp.toString() + nonce)
   sortedBondIds = selectedBonds.map(b => b.bondId).sort().join(",")
   
-  txPayload = txId + sender.userId + receiverQR.receiverId + totalAmount.toString() + timestamp.toString() + nonce + sortedBondIds
+  txPayload = txId + sender.userId + receiverSessionMetadata.receiverId + totalAmount.toString() + timestamp.toString() + nonce + sortedBondIds
   txSignature = Keystore.sign(SHA256(txPayload), "bondpay_user_private_key")
 
   SQLite.transaction():
@@ -314,7 +326,7 @@ FUNCTION createTransaction(sender, receiverQR, selectedBonds):
     SQLite.insertTransaction({
       txId: txId,
       senderId: sender.userId,
-      receiverId: receiverQR.receiverId,
+      receiverId: receiverSessionMetadata.receiverId,
       totalAmount: totalAmount,
       timestamp: timestamp,
       nonce: nonce,
@@ -329,8 +341,8 @@ FUNCTION createTransaction(sender, receiverQR, selectedBonds):
 
 ### 7.4 Client Verification & Acceptance (Receiver Offline)
 ```
-FUNCTION verifyAndAcceptPayment(paymentQR, receiverId):
-  { transaction, bonds } = paymentQR
+FUNCTION verifyAndAcceptPayment(paymentPayload, receiverId):
+  { transaction, bonds } = paymentPayload
 
   // 1. Verify server signature on each bond
   FOR each bond IN bonds:
@@ -384,6 +396,51 @@ FUNCTION verifyAndAcceptPayment(paymentQR, receiverId):
     SQLite.insertTransactionBonds(transaction.txId, bonds, "incoming")
 
   RETURN { success: true, amount: transaction.totalAmount }
+```
+
+### 7.5 BLE Transmission Protocol (Handshake, Packetization, & Verification)
+Because BLE packets are limited in size (MTU limits from 23 to 512 bytes), payment payloads are segmented, transmitted sequentially, and reconstructed on the receiving device.
+
+```
+FUNCTION transmitPayloadOverBLE(payloadString, bleConnection):
+  // 1. Compress and chunk
+  deflatedData = deflate(payloadString)
+  chunks = chunkBytes(deflatedData, size = BLE_MAX_MTU - BLE_HEADER_SIZE)
+  totalChunks = chunks.length
+  sessionId = bleConnection.sessionId
+  checksum = calculateDJB2(deflatedData)
+
+  // 2. Perform handshakes and staged transmission
+  IF NOT bleConnection.sendStageSignal("HANDSHAKE") THEN RETURN error("Handshake failed")
+  
+  metadata = { totalChunks: totalChunks, checksum: checksum, sessionId: sessionId }
+  IF NOT bleConnection.sendStagePayload("METADATA", metadata) THEN RETURN error("Metadata rejected")
+  IF NOT bleConnection.waitForACK("METADATA") THEN RETURN error("Metadata ACK timeout")
+
+  // 3. Transmit Chunks with Retries and Sequence Numbers
+  FOR idx FROM 0 TO totalChunks - 1:
+    chunkPayload = createChunkEnvelope(chunks[idx], idx, totalChunks, sessionId)
+    success = FALSE
+    retries = 0
+    
+    WHILE NOT success AND retries < MAX_BLE_RETRIES:
+      bleConnection.writeCharacteristic(chunkPayload)
+      IF bleConnection.waitForACK("CHUNK_" + idx.toString(), timeout = 300) THEN
+        success = TRUE
+      ELSE
+        retries += 1
+        
+    IF NOT success THEN
+      bleConnection.sendStageSignal("ABORT")
+      RETURN error("Link failed at chunk " + idx.toString())
+
+  // 4. Send Signatures Stage
+  IF NOT bleConnection.sendStageSignal("SIGNATURE_STAGE") THEN RETURN error("Signature sync failed")
+  IF NOT bleConnection.waitForACK("SIGNATURE_STAGE") THEN RETURN error("Signature stage ACK timeout")
+  
+  bleConnection.sendStageSignal("COMPLETE")
+  bleConnection.disconnect()
+  RETURN success
 ```
 
 ---
@@ -497,10 +554,10 @@ sequenceDiagram
     participant S as Server
 
     Note over A,C: All parties are offline. Alice has 500 NPR bond.
-    A->>B: Scans Request QR → Sends 500 NPR Bond (Tx 1)
+    A->>B: Scans Request QR → Establishes BLE Session → Sends 500 NPR Bond (Tx 1)
     Note over B: Stores Tx 1 locally as 'pending'
     Note over A: Alice rolls back her database to mark bond as 'available'
-    A->>C: Scans Request QR → Sends same 500 NPR Bond (Tx 2)
+    A->>C: Scans Request QR → Establishes BLE Session → Sends same 500 NPR Bond (Tx 2)
     Note over C: Stores Tx 2 locally as 'pending'
     Note over B,S: Bob comes online first. Syncs.
     B->>S: Sync Tx 1 (Alice 500 NPR Bond)
@@ -533,21 +590,14 @@ sequenceDiagram
 - **Problem**: If A pays B offline, and B immediately pays C offline with the same bond, B can double-spend by syncing their balance before C.
 - **Solution: Direct-to-Online Balance Model**: Received offline bonds are stored in the receiver's database as `received_pending_sync` (Orange UI, Pending Online Balance). **The app blocks users from spending bonds marked `received_pending_sync` offline**. They must go online and sync to convert the pending bonds into `online_balance` (Green UI), from which they can load fresh bonds.
 
-### 9.3 QR Code Payload Size (Animated Multi-QR Carousel)
-- **Problem**: A transaction with several signatures and bond structures exceeds 2000 characters. Scanning this as a single dense QR code fails on lower-end cameras.
-- **Solution: Animated QR Carousel**: The client compresses the payload using deflate, base64 encodes the bytes, and splits them into **~300 character** chunks. The app displays these chunks sequentially in an animated carousel (3 Hz, 333ms per frame). The receiver scans the cycling frames, gathers the chunks via an accumulator map, verifies the checksum, and processes the complete payload.
-
-**QR Chunk Envelope JSON**:
-```json
-{
-  "v": 1,
-  "sid": "A3F1B2",
-  "i": 2,
-  "t": 6,
-  "d": "aGFzaC1kYXRhLXNlZ21lbnQ...",
-  "cs": "4e7a89b1"
-}
-```
+### 9.3 Bluetooth Low Energy (BLE) Transmission and Packet Fragmentation
+- **Problem**: Relaying several bonds and cryptographic signatures results in payloads exceeding 2,000 bytes. This cannot be packed into a lightweight QR code without causing optical scanning density issues.
+- **Solution: QR-Assisted Ephemeral BLE Handshake**:
+  1. The receiver app displays a lightweight QR containing session parameters (Receiver ID, ephemeral Session ID, temporary BLE Service UUID, Nonce, Timestamp, and Protocol Version). Simultaneously, the receiver starts BLE advertising.
+  2. The sender scans the QR and retrieves the Session ID. The sender immediately searches for advertisements containing matching Service UUID/Session ID and connects automatically.
+  3. Because this is connection-based BLE without security bonding (pairing-free), it starts instantly.
+  4. Payloads are divided into MTU-sized packets (e.g., 256 bytes) containing sequence numbers and checksums.
+  5. The receiver reassembles the chunks, computes the integrity checksum (DJB2/SHA-256), sends a final completion ACK, and closes the connection.
 
 ---
 
@@ -880,53 +930,52 @@ Manages cryptographic functions:
 - **`signTransaction(data, userId)`**: Signs SHA-256 hash of transactions inside the Secure Enclave.
 - **`verifyServerBondSignature(...)` & `verifySenderSignature(...)`**: Evaluates Ed25519 inputs against public keys offline.
 
-### 12.3 MultiQRService (`multiqr.service.ts`)
-Provides animated QR frame segmentation:
-- **`encode(payload, chunkSize)`**: Deflates string, converts to Base64, and splits into chunk packages with indexing headers.
-- **`createAccumulator(onComplete)`**: Tracks session frames, visual progress counts, and computes checksum validation upon sequence reassembly.
+### 12.3 BLECommunicationService (`ble.service.ts`)
+Responsible for offline transport of transactions:
+- **`startAdvertising(receiverId, amount)`**: Advertises a temporary BLE Service UUID containing session initiation metadata and handles socket creation.
+- **`startDiscovery(targetSessionUUID)`**: Scans for advertisements matching the target UUID scanned from the optical QR code. Connects automatically.
+- **`sendPayload(payload)`**: Splits payload into sequential packets, handles retransmissions on NACK or timeout, and verifies receipt of stage signatures.
+- **`receivePayload()`**: Accumulates incoming chunks on a temporary BLE characteristic, verifies checksum validation, updates transfer progress hooks, and saves to SQLite.
 
 ---
 
-## 13. Hardware Terminal: BondPay Station (RFID Checkout)
+## 13. Hardware Terminal: BondPay Station (RFID & BLE Checkout)
 
-The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
+The **BondPay Station** is an ESP8266/ESP32-based offline RFID and BLE checkout terminal.
 
 ### 13.1 Pin Connections Table
-| MFRC522 Pin | ESP8266 NodeMCU Pin | Description |
-|-------------|---------------------|-------------|
-| **3.3V**    | 3.3V                | Power supply. **Warning: 5V will fry the MFRC522** |
-| **RST**     | D3 (GPIO 0)         | Reset Pin |
-| **GND**     | GND                 | Ground |
-| **MISO**    | D6 (GPIO 12)        | SPI MISO |
-| **MOSI**    | D7 (GPIO 13)        | SPI MOSI |
-| **SCK**     | D5 (GPIO 14)        | SPI Clock |
-| **SDA (SS)**| D8 (GPIO 15)        | Slave Select |
+| MFRC522 Pin | ESP32 NodeMCU Pin | Description |
+|-------------|-------------------|-------------|
+| **3.3V**    | 3.3V              | Power supply. **Warning: 5V will fry the MFRC522** |
+| **RST**     | D22 (GPIO 22)     | Reset Pin |
+| **GND**     | GND               | Ground |
+| **MISO**    | D19 (GPIO 19)     | SPI MISO |
+| **MOSI**    | D23 (GPIO 23)     | SPI MOSI |
+| **SCK**     | D18 (GPIO 18)     | SPI Clock |
+| **SDA (SS)**| D5 (GPIO 5)       | Slave Select |
 
-| LCD Pin (I2C) | ESP8266 Pin | Description |
-|---------------|-------------|-------------|
-| **VCC**       | VU / 5V     | LCD logic power |
-| **GND**       | GND         | Ground |
-| **SDA**       | D2 (GPIO 4) | I2C Data |
-| **SCL**       | D1 (GPIO 5) | I2C Clock |
+| LCD Pin (I2C) | ESP32 Pin | Description |
+|---------------|-----------|-------------|
+| **VCC**       | 5V        | LCD logic power |
+| **GND**       | GND       | Ground |
+| **SDA**       | D21 (GPIO 21)| I2C Data |
+| **SCL**       | D22 (GPIO 22)| I2C Clock |
 
-| Components | ESP8266 Pin | Description |
-|------------|-------------|-------------|
-| **Green LED Anode** | D4 (GPIO 2) | Flash on success (requires $220\Omega$ resistor to GND) |
-| **Red LED Anode**   | D0 (GPIO 16)| Flash on failure (requires $220\Omega$ resistor to GND) |
-| **Buzzer (+)**      | D9 (RX)     | Signal beeps (negative pin to GND) |
+| Components | ESP32 Pin | Description |
+|------------|-----------|-------------|
+| **Green LED Anode** | D2 (GPIO 2)  | Flash on success (requires $220\Omega$ resistor to GND) |
+| **Red LED Anode**   | D4 (GPIO 4)  | Flash on failure (requires $220\Omega$ resistor to GND) |
+| **Buzzer (+)**      | D25 (GPIO 25)| Signal beeps (negative pin to GND) |
 
 ### 13.2 Firmware & Data Upload Guide
-1. Install **Arduino IDE** and add the ESP8266 boards URL: `http://arduino.esp8266.com/stable/package_esp8266com_index.json` to Preferences.
-2. Search and install board package: **esp8266** by ESP8266 Community.
+1. Install **Arduino IDE** and add the ESP32 boards URL: `https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json` to Preferences.
+2. Search and install board package: **esp32** by Espressif Systems.
 3. Install dependencies from the Arduino Library Manager:
    - `MFRC522` by GithubCommunity
    - `LiquidCrystal I2C` by Frank de Brabander
    - `ArduinoJson` (v6.x or v7.x)
-   - Download `ESPAsyncTCP` and `ESPAsyncWebServer` from GitHub and add as zip libraries.
-4. Download the [LittleFS Upload Plugin](https://github.com/earlephilhower/arduino-esp8266littlefs-plugin) and place in your Arduino directory.
-5. Set Board to **NodeMCU 1.0 (ESP-12E Module)**, Flash size: **4MB (FS: 2MB)**.
-6. Open `BondPay_Terminal.ino`, compile, and click Upload.
-7. Close the serial monitor, click **Tools → ESP8266 LittleFS Data Upload** to upload dashboard HTML and javascript to flash memory.
+   - `ESP32 BLE Arduino` (standard library)
+4. Upload firmware to the device. The ESP32 acts as a BLE Advertiser and GATT Server, allowing offline transaction transfers from customer phones when placed near the terminal.
 
 ---
 
@@ -936,14 +985,19 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
 |----|---------------|----------|---------------------|
 | **T1** | **Counterfeit Bonds** (Attacker mints fake bond tokens) | **HIGH** | Every bond contains a server Ed25519 signature. Receiver verifies this signature offline using the server's public key. Fake bonds are rejected offline. |
 | **T2** | **Bond Value Tampering** (Attacker alters bond denomination) | **HIGH** | The server signature covers the value field (`bondId + value...`). Changing the value invalidates the signature. |
-| **T3** | **Replay Attacks** (Intercepting and reusing a payment QR) | **MEDIUM**| Every transaction has a 128-bit random `nonce` and a `timestamp`. Replays are rejected by unique key constraints in local SQLite and server PostgreSQL. |
+| **T3** | **Replay Attacks** (Intercepting and reusing a transaction payload) | **MEDIUM**| Every transaction has a 128-bit random `nonce` and a `timestamp`. Replays are rejected by unique key constraints in local SQLite and server PostgreSQL. |
 | **T4** | **Signature Forgery** (Attacker signs transactions as another user) | **HIGH** | User private keys are isolated in Android Keystore / Apple Secure Enclave. Transactions are signed using Ed25519 with SHA-256 pre-hashing, which has a 128-bit security level. |
-| **T5** | **Man-in-the-Middle (MitM)** (Network interception of transactions) | **MEDIUM**| Transaction payloads are transferred directly between devices via optical QR codes. There is no active network interface to intercept. |
+| **T5** | **Man-in-the-Middle (MitM)** (Network interception of transactions) | **MEDIUM**| Payload is transferred directly over BLE. If an attacker intercepts the BLE packets, they cannot decrypt the user signature or inject modifications without failing Ed25519 validation. |
 | **T6** | **Private Key Extraction** (Attacker reads private key from local files) | **HIGH** | Private keys are stored in secure storage (`expo-secure-store`) using hardware-level key isolation. Keys cannot be read, even on rooted devices. |
 | **T7** | **Race Conditions (TOCTOU)** (Exploiting timing gaps to double-spend online) | **MEDIUM**| Server uses PostgreSQL `SELECT ... FOR UPDATE` pessimistic locks during transfers to queue concurrent transactions. |
 | **T8** | **Expired Bonds Spend** (Attacker attempts to spend old bonds) | **LOW** | Expired bonds are rejected during local verification, and the server verifies `expires_at` during synchronization. |
 | **T9** | **Sync Batch Replay** (Attacker resubmits processed sync batch) | **MEDIUM**| Sync batches use unique `batchId` keys. The server caches sync results in `sync_batches` to ensure idempotency. |
 | **T10**| **Offline Double-Spending** (Attacker spends same bond to multiple offline users) | **HIGH** | Verified during server synchronization. The first redemption succeeds; subsequent syncs throw constraint violations on `bond_redemptions`. The double-spending user is flagged (`DOUBLE_SPEND` in `fraud_flags` table) and penalised (account frozen, velocity limit of 3000 NPR, legal terms). |
+| **T11**| **BLE Packet Interception** (Eavesdropping on BLE transmission) | **LOW**  | Bluetooth is only the transport layer. Captured packets contain signatures and public keys, but without user private keys, eavesdroppers cannot execute new transactions. |
+| **T12**| **BLE Man-in-the-Middle (MitM)** (Attacker alters packet stream) | **MEDIUM**| Session keys and nonces are bound via the optical QR initiation scan. Any alteration of packets causes local Ed25519 validation to fail on the receiver's app. |
+| **T13**| **Device Impersonation** (Malicious nodes advertising fake sessions) | **LOW**  | Senders only connect to the BLE Service UUID and Session ID matched in the scanned QR. Rogue advertisements are ignored. |
+| **T14**| **Session Hijacking** (Attacker hijacks connection to steal payload) | **LOW**  | The transaction payload binds the specific Receiver ID. A hijacked payload cannot be redeemed by another merchant. |
+| **T15**| **Forced Disconnects** (Attacker drops BLE link to cause errors) | **MEDIUM**| SQLite stores active state, permitting transaction rollback if connection fails. Senders revert bond statuses to `available` if the ACK complete phase is not logged. |
 
 ---
 
@@ -955,18 +1009,18 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
 | **Crypto Signature** | `@noble/ed25519` (Pure JS) | `react-native-quick-crypto` | 100x faster, compiles using C++ bindings. |
 | **Key Storage** | `expo-secure-store` | `react-native-keychain` + attestation | Verifies hardware backing check (TEE/Keystore). |
 | **Local SQL DB** | `expo-sqlite` (Unencrypted) | `op-sqlite` + SQLCipher | Enforces full database encryption on disk. |
-| **QR Scanner** | `expo-camera` | `react-native-vision-camera` | Advanced frame processing and auto-focus control. |
+| **BLE Protocol** | `react-native-ble-plx` | Native BLE bindings | Handles larger custom MTU sizes and faster BLE packet transfers. |
 | **Worker Queue** | Synchronous REST | BullMQ + Redis | Process sync batches asynchronously. |
 | **Secrets Manager**| Node `.env` config file | HashiCorp Vault | Safe storage of the Server Private Key. |
 
 ### 15.2 Payment Alternatives Comparison
-| Capability | BondPay | Physical Cash | eSewa / Khalti | Cryptocurrencies |
-|------------|---------|---------------|----------------|------------------|
+| Capability | BondPay (QR + BLE) | Physical Cash | eSewa / Khalti | Cryptocurrencies |
+|------------|--------------------|---------------|----------------|------------------|
 | **Offline Spend** | **✅ Yes** | ✅ Yes | ❌ No | ❌ No |
-| **D2D Transfer** | **✅ Yes (QR)** | ✅ Yes (Physical) | ❌ No | ⚠️ Yes (App needed) |
+| **D2D Transfer** | **✅ Yes (BLE)** | ✅ Yes (Physical) | ❌ No | ⚠️ Yes (App needed) |
 | **Sync Settlement** | **Asynchronous** | Manual Deposit | Synchronous | Peer verification |
 | **Audit Trails** | **✅ Cryptographic**| ❌ None | ✅ Database | ✅ Public ledger |
-| **Hardware Terminals**| **✅ ESP8266 RFID** | ❌ Cash Registers | ❌ None | ❌ Point-of-Sale |
+| **Hardware Terminals**| **✅ ESP32 BLE/RFID** | ❌ Cash Registers | ❌ None | ❌ Point-of-Sale |
 
 ---
 
@@ -976,7 +1030,7 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
 2. **Denomination Fragmentation**: As bonds change hands offline, denomination ratios become skewed (e.g., too many small denominations vs. none). Balancing offline changes without central coordination is a hard distribution problem.
 3. **Revocation Propagation Offline**: If a server revokes a bond ID, this fact cannot propagate to other offline devices before sync. Mitigating this risk depends on keeping bond TTL windows narrow.
 4. **Offline synchronization conflict resolution in multi-party chains**: Reconstructing un-synced transactions from arbitrary peer hops without real-time ledgers is mathematically challenging.
-5. **Anonymity vs Accountability**: Designing offline cash systems that preserve financial privacy while ensuring strict AML/KYC logging of double-spend attempts.
+5. **BLE Radio Interference in Congested Markets**: Designing adaptive frequency channel maps to minimize connection latency in high-density areas with severe 2.4GHz interference.
 
 ---
 
@@ -1044,7 +1098,7 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
   - Mathematical verifiability offline using Ed25519 signatures.
 - **Visual Action**: Render a physical banknote comparison diagram.
 - **Verbal Script**:
-> "BondPay replaces database numbers with 'Bonds'—mathematical representations of banknotes. When online, you deduct balance to load a bond. The server signs the bond with its private key. This signature acts as an unforgeable watermark. You can now transfer this bond offline via QR codes, and any device can verify its authenticity using the server's public key."
+> "BondPay replaces database numbers with 'Bonds'—mathematical representations of banknotes. When online, you deduct balance to load a bond. The server signs the bond with its private key. This signature acts as an unforgeable watermark. You can now transfer this bond offline over BLE, and any device can verify its authenticity using the server's public key."
 
 ### 18.4 Slide 4: The 4 Transaction Modes
 - **Slide Title**: Adaptive Connectivity Matrix
@@ -1057,15 +1111,15 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
 - **Verbal Script**:
 > "Connectivity is fluid, so BondPay adapts. If both users are online, we transfer instantly (Mode 1). If the sender is online but the receiver is offline, we create a secure pending pickup (Mode 2). When the sender is offline but the receiver is online, we transfer a bond and sync immediately (Mode 3). If both are offline, we complete the transaction peer-to-peer and defer sync (Mode 4)."
 
-### 18.5 Slide 5: The Cryptographic Handshake
-- **Slide Title**: Secure Offline Verification
+### 18.5 Slide 5: The Cryptographic BLE Handshake
+- **Slide Title**: Secure Offline Verification over BLE
 - **Bullet Points**:
   - Ed25519 produces compact 64-byte signatures.
-  - SHA-256 pre-hashing prevents length-extension attacks.
+  - BLE used as an ephemeral transport layer with sequence validation.
   - Hashing binds bond IDs to transaction signatures, preventing swapping.
-- **Visual Action**: Render the QR payload cryptographic hashing equation.
+- **Visual Action**: Render the QR scan session handshake mapping to BLE channel stream.
 - **Verbal Script**:
-> "How do we ensure security offline? We use Ed25519 asymmetric cryptography. During a payment, the sender selects bonds, hashes the payload—binding the bond IDs to the signature—and signs it using their private key stored in the secure hardware enclave. The receiver scans and verifies both the server's signature on the bonds and the sender's signature on the transaction. All verification is done locally without internet."
+> "How do we ensure security offline? We use Ed25519 asymmetric cryptography over Bluetooth Low Energy. The user scans a lightweight QR to retrieve session keys and Service UUIDs, initiating an automatic, pairing-free BLE channel. The sender selects bonds, hashes the payload—binding the bond IDs to the signature—and signs it using their private key stored in the secure hardware enclave. The receiver verifies both the server's signature on the bonds and the sender's signature on the transaction. BLE is strictly our transport; trust remains fully cryptographic."
 
 ### 18.6 Slide 6: Database & Schemas
 - **Slide Title**: Synchronous Ledgers & SQLite
@@ -1088,20 +1142,20 @@ The **BondPay Station** is an ESP8266-based offline RFID card checkout terminal.
 > "Let's be realistic: no offline system can block double-spending at the moment of payment without specialized hardware. BondPay manages this through bounded risk. We enforce a 3,000 NPR cap on offline bonds, secure the app with biometrics, and use configurable exipry times. If a double-spend occurs, the server catches it during sync, freezes the fraudster's account, and resolves the ledger. This matches the floor-limit models of global EMV credit cards."
 
 ### 18.8 Slide 8: Interactive Demo Set
-- **Slide Title**: Live System Walkthrough
-- **Visual Action**: Live demo on physical devices. (Seller: Merchant terminal / Buyer: Trekker app).
+- **Slide Title**: Live System Walkthrough over BLE
+- **Visual Action**: Live demo on physical devices showing QR session launch and automatic background BLE data stream.
 - **Verbal Script**:
-> "Now let us show you this in action. We have two physical devices here. Both are set to airplane mode—completely offline. The merchant generates a Rs.100 payment request. The buyer scans it, authorizes it using fingerprint biometrics, and displays the payment confirmation QR. The merchant scans the payment QR, verifies the signatures offline, and stores the Rs.100 bond. The checkout is complete. We then connect the merchant to the internet, tap sync, and show the balance credit on the cloud ledger."
+> "Now let us show you this in action. We have two physical devices here. Both are set to airplane mode—completely offline. The merchant enters Rs.100 and shows a QR code. The buyer scans it. Instantly, a background BLE link is established without any manual Bluetooth configuration or pairing prompt. The buyer completes the fingerprint check, and the transaction details stream invisibly over BLE. Within seconds, the merchant's screen updates to show 'Rs.100 Received' and validates the signature. The connection disconnects automatically."
 
 ### 18.9 Slide 9: Hardware Terminal
 - **Slide Title**: BondPay Station
 - **Bullet Points**:
-  - ESP8266 microcontroller hosting local AP and Web Dashboard.
+  - ESP32 microcontroller hosting local AP, BLE service, and Web Dashboard.
   - RFID MFRC522 integration for contactless offline card checkout.
   - LCD screen diagnostics and LED success indicators.
-- **Visual Action**: Show the physical ESP8266 node diagram.
+- **Visual Action**: Show the physical ESP32 node diagram.
 - **Verbal Script**:
-> "To prove commercial readiness, we designed the BondPay Station. This is an ESP8266 NodeMCU terminal integrated with an RFID reader and I2C LCD screen. Merchants can access a local dashboard hosted on the device to register customer cards, monitor offline payments, and execute local diagnostics without internet."
+> "To prove commercial readiness, we designed the BondPay Station. This is an ESP32 terminal integrated with an RFID reader, BLE radio controller, and I2C LCD screen. Merchants can access a local dashboard hosted on the device to register customer cards, monitor offline payments, and execute local diagnostics without internet."
 
 ### 18.10 Slide 10: Conclusion & Roadmap
 - **Slide Title**: Engineering a Connected Nepal
