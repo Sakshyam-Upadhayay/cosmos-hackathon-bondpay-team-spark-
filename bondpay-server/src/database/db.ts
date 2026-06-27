@@ -78,7 +78,7 @@ const runMockQuery = (text: string, params: any[] = []): { rows: any[]; rowCount
       full_name: params[2],
       password_hash: params[3],
       public_key: params[4],
-      online_balance: params[5] !== undefined ? parseInt(params[5], 10) : 10000, // Default 10000 balance for offline testing!
+      online_balance: 100000, // Pre-fund local user with 100,000 rupees for easy offline testing/loading
       active_device_id: params[6]
     };
     dbMemory.users.push(newUser);
@@ -86,8 +86,8 @@ const runMockQuery = (text: string, params: any[] = []): { rows: any[]; rowCount
     return { rows: [{ user_id: newUser.user_id }], rowCount: 1 };
   }
 
-  // 3. Auth: Login lookup
-  if (norm.includes('from users') && norm.includes('phone_number = $1 or email = $1')) {
+  // 3. Auth: Login lookup by email or phone
+  if (norm.includes('from users') && (norm.includes('where email = $1') || norm.includes('where phone_number = $1'))) {
     const val = params[0];
     const user = dbMemory.users.find(u => u.phone_number === val || u.email === val);
     return { rows: user ? [user] : [], rowCount: user ? 1 : 0 };

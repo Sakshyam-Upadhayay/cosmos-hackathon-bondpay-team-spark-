@@ -1,0 +1,71 @@
+{
+  "users": [
+    {
+      "user_id": "d0573411-ebaa-42f6-a4a6-95724a433730",
+      "phone_number": "9841525175",
+      "email": "test-1782593219074@example.com",
+      "full_name": "Test User",
+      "password_hash": "$2b$10$PjPEOOM7V7VBSV.TewgaZOvA0WSKpDMiUAJT8yzIr6vSYWkw39Ga.",
+      "public_key": null,
+      "online_balance": 0,
+      "active_device_id": "device-xyz"
+    },
+    {
+      "user_id": "50c04f4b-2300-40e8-8742-84cdb6bbcaa0",
+      "phone_number": "9841247838",
+      "email": "test-1782593225995@example.com",
+      "full_name": "Test User",
+      "password_hash": "$2b$10$BiSQ/U8pyURt7WhkKFEe3OSGVsXCnRLRD4FgUqskwSN7zPTjdghOq",
+      "public_key": null,
+      "online_balance": 0,
+      "active_device_id": "device-xyz"
+    },
+    {
+      "user_id": "4245d242-9bd2-45cc-a357-72546159f5a5",
+      "phone_number": "9841516925",
+      "email": "test-1782593240835@example.com",
+      "full_name": "Test User",
+      "password_hash": "$2b$10$BfhA9ck/47tILp5LlDFUVuNRpkl.rYHU9tKpmiaj46/.NfxVk4phe",
+      "public_key": null,
+      "online_balance": 0,
+      "active_device_id": "device-xyz"
+    },
+    {
+      "user_id": "816c6e34-c9b8-42d1-bc57-1455a90e99e5",
+      "phone_number": "9841860445",
+      "email": "test-1782593259297@example.com",
+      "full_name": "Test User",
+      "password_hash": "$2b$10$cT2az5zqm038Lg9WCVeiIu7N1AhCLf53yGG9DcSnCy1HXsUXrOC.y",
+      "public_key": null,
+      "online_balance": 100000,
+      "active_device_id": "device-xyz"
+    }
+  ],
+  "issued_bonds": [],
+  "transactions": [],
+  "pending_pickups": [],
+  "bond_redemptions": [],
+  "sync_batches": [],
+  "system_config": [
+    {
+      "config_key": "min_denomination",
+      "config_value": "5"
+    },
+    {
+      "config_key": "max_offline_capacity",
+      "config_value": "10000"
+    },
+    {
+      "config_key": "qr_switching_delay",
+      "config_value": "333"
+    },
+    {
+      "config_key": "max_bonds_per_request",
+      "config_value": "50"
+    },
+    {
+      "config_key": "bond_ttl_days",
+      "config_value": "30"
+    }
+  ]
+}
