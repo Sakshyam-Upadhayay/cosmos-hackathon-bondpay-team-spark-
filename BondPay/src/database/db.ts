@@ -12,6 +12,26 @@ export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
 export async function initializeLocalDatabase(): Promise<void> {
   const database = await getDatabase();
 
+  let needsRecreate = false;
+  try {
+    await database.getFirstAsync('SELECT current_owner_id FROM bonds LIMIT 1');
+  } catch (e) {
+    const errStr = String(e);
+    if (errStr.includes('no such column')) {
+      needsRecreate = true;
+    }
+  }
+
+  if (needsRecreate) {
+    console.log('Schema mismatch detected, dropping and recreating tables...');
+    await database.execAsync(`
+      DROP TABLE IF EXISTS transaction_bonds;
+      DROP TABLE IF EXISTS transactions;
+      DROP TABLE IF EXISTS bonds;
+      DROP TABLE IF EXISTS sync_log;
+    `);
+  }
+
   await database.execAsync(`
     PRAGMA foreign_keys = ON;
 
