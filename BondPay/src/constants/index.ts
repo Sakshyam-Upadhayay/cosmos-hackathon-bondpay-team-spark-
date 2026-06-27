@@ -1,0 +1,20 @@
+export const API_BASE_URL = 'http://localhost:3000';
+
+export const BLE_SERVICE_UUID = 'E3F1C990-2B3A-4D78-95D9-23CE6305C001';
+export const BLE_CONTROL_CHAR_UUID = 'E3F1C990-2B3A-4D78-95D9-23CE6305C002';
+export const BLE_DATA_CHAR_UUID = 'E3F1C990-2B3A-4D78-95D9-23CE6305C003';
+
+export const BLE_MAX_MTU = 512;
+export const BLE_HEADER_SIZE = 4;
+export const BLE_MAX_RETRIES = 3;
+export const BLE_TIMEOUT_MS = 3000;
+
+export const PROTOCOL_VERSION = 1;
+
+export const CLOCK_SKEW_TOLERANCE = 300;
+
+export const SERVER_PUBLIC_KEY_HEX = '';
+
+export const STANDARD_DENOMINATIONS = [1000, 500, 100, 50, 20, 10, 5];
+
+export const BOND_TTL_HOURS = 72;
