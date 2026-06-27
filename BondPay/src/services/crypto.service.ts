@@ -1,6 +1,6 @@
 import * as ed from '@noble/ed25519';
 import * as SecureStore from 'expo-secure-store';
-import QuickCrypto from 'react-native-quick-crypto';
+import CryptoJS from 'crypto-js';
 import { UserKeys } from '../types';
 import { SERVER_PUBLIC_KEY_HEX } from '../constants';
 
@@ -79,21 +79,16 @@ export async function verifySenderSignature(
 }
 
 export async function encryptAndBackupKey(password: string, privateKeyHex: string) {
-  const salt = QuickCrypto.randomBytes(16).toString('hex');
+  const salt = CryptoJS.lib.WordArray.random(16).toString();
+  
+  const derivedKey = CryptoJS.PBKDF2(password, salt, {
+    keySize: 256 / 32,
+    iterations: 100000,
+  }).toString();
 
-  const derivedKey = QuickCrypto.pbkdf2Sync(password, salt, 100000, 32, 'sha256');
-
-  const iv = QuickCrypto.randomBytes(12);
-  const cipher = QuickCrypto.createCipheriv('aes-256-gcm', derivedKey, iv);
-
-  let encrypted = cipher.update(privateKeyHex, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-
-  const authTag = cipher.getAuthTag().toString('hex');
+  const encrypted = CryptoJS.AES.encrypt(privateKeyHex, derivedKey).toString();
 
   const payload = JSON.stringify({
-    iv: iv.toString('hex'),
-    authTag: authTag,
     ciphertext: encrypted,
   });
 
@@ -109,21 +104,17 @@ export async function decryptAndRecoverKey(
   keyBackupSalt: string
 ): Promise<string | null> {
   try {
-    const { iv, authTag, ciphertext } = JSON.parse(encryptedKeyBackup);
+    const { ciphertext } = JSON.parse(encryptedKeyBackup);
 
-    const derivedKey = QuickCrypto.pbkdf2Sync(password, keyBackupSalt, 100000, 32, 'sha256');
+    const derivedKey = CryptoJS.PBKDF2(password, keyBackupSalt, {
+      keySize: 256 / 32,
+      iterations: 100000,
+    }).toString();
 
-    const decipher = QuickCrypto.createDecipheriv(
-      'aes-256-gcm',
-      derivedKey,
-      Buffer.from(iv, 'hex')
-    );
-    decipher.setAuthTag(Buffer.from(authTag, 'hex'));
+    const bytes = CryptoJS.AES.decrypt(ciphertext, derivedKey);
+    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
 
-    let decrypted = decipher.update(ciphertext, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
+    return decrypted || null;
   } catch (err) {
     console.error('Key recovery failed:', err);
     return null;

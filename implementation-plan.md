@@ -532,7 +532,6 @@ void setupBLE() {
 ```
 
 ---
-
 ## 9. Security Audit & Hardening Checklist
 
 During implementation, enforce the following security rules:
