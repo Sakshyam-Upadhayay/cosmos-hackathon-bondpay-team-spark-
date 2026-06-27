@@ -141,7 +141,7 @@ export class BLEService {
         const packetBytes = buildBLEPacket(header, dataFragment);
 
         // Log sending packet
-        addLog('DEBUG', 'BLEService.sendPayloadOverBLE', `Sending packet ${i + 1}/${totalChunks}, bytes=${packetBytes.length}`);
+        addLog('INFO', 'BLEService.sendPayloadOverBLE', `Sending packet ${i + 1}/${totalChunks}, bytes=${packetBytes.length}`);
 
         // Update sender progress
         const chunkPercent = 60 + Math.round((i / totalChunks) * 20); // Scale between 60% and 80%
