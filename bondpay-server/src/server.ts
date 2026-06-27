@@ -60,6 +60,69 @@ app.get('/server/config', async (req, res) => {
   }
 });
 
+// BLE P2P Local LAN Bridge
+interface BLESession {
+  sessionId: string;
+  status: 'waiting' | 'sent' | 'completed' | 'failed';
+  payload?: string;
+}
+
+const bleSessions = new Map<string, BLESession>();
+
+app.post('/server/ble-session/register', (req, res) => {
+  const { sessionId } = req.body;
+  if (!sessionId) {
+    res.status(400).json({ error: 'Missing sessionId' });
+    return;
+  }
+  bleSessions.set(sessionId, { sessionId, status: 'waiting' });
+  res.status(200).json({ success: true });
+});
+
+app.post('/server/ble-session/send', (req, res) => {
+  const { sessionId, payload } = req.body;
+  if (!sessionId || !payload) {
+    res.status(400).json({ error: 'Missing sessionId or payload' });
+    return;
+  }
+  bleSessions.set(sessionId, { sessionId, status: 'sent', payload });
+  res.status(200).json({ success: true });
+});
+
+app.get('/server/ble-session/receive', (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  if (!sessionId) {
+    res.status(400).json({ error: 'Missing sessionId' });
+    return;
+  }
+  const session = bleSessions.get(sessionId);
+  res.status(200).json(session || { sessionId, status: 'waiting' });
+});
+
+app.post('/server/ble-session/complete', (req, res) => {
+  const { sessionId, success } = req.body;
+  if (!sessionId) {
+    res.status(400).json({ error: 'Missing sessionId' });
+    return;
+  }
+  const session = bleSessions.get(sessionId);
+  if (session) {
+    session.status = success ? 'completed' : 'failed';
+    bleSessions.set(sessionId, session);
+  }
+  res.status(200).json({ success: true });
+});
+
+app.get('/server/ble-session/status', (req, res) => {
+  const sessionId = req.query.sessionId as string;
+  if (!sessionId) {
+    res.status(400).json({ error: 'Missing sessionId' });
+    return;
+  }
+  const session = bleSessions.get(sessionId);
+  res.status(200).json(session || { sessionId, status: 'waiting' });
+});
+
 import { query } from './database/db';
 
 app.get('/health', (req, res) => {
