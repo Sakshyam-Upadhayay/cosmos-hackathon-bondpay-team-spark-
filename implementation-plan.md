@@ -61,7 +61,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 2. Create Users Table
 CREATE TABLE users (
-    user_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     phone_number TEXT UNIQUE NOT NULL,
     email TEXT UNIQUE NOT NULL,
     full_name TEXT NOT NULL,
@@ -71,6 +71,7 @@ CREATE TABLE users (
     is_frozen BOOLEAN NOT NULL DEFAULT false,
     registered_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     active_device_id TEXT,
+    ttl_hours INTEGER DEFAULT 72,
     encrypted_key_backup TEXT,
     key_backup_salt TEXT
 );
@@ -90,51 +91,86 @@ CREATE TABLE issued_bonds (
 CREATE INDEX idx_issued_bonds_owner ON issued_bonds(owner_id);
 CREATE INDEX idx_issued_bonds_status ON issued_bonds(status);
 
--- 4. Create Bond Redemptions Table
+-- 4. Create Pending Pickups Table (Mode 2 transfers)
+CREATE TABLE pending_pickups (
+    pickup_id TEXT PRIMARY KEY,
+    sender_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    receiver_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+    amount BIGINT NOT NULL CHECK (amount > 0),
+    pickup_code TEXT UNIQUE NOT NULL,
+    server_sig TEXT NOT NULL,
+    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'claimed', 'expired')),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    claimed_at TIMESTAMPTZ
+);
+
+-- 5. Create Transactions Audit Table
+CREATE TABLE transactions (
+    tx_id TEXT PRIMARY KEY,
+    tx_type TEXT NOT NULL DEFAULT 'P2P_OFFLINE' CHECK (tx_type IN ('P2P_OFFLINE', 'P2P_ONLINE', 'P2P_PENDING', 'BOND_LOAD', 'BOND_REVERSE', 'TOPUP', 'BOND_REFUND')),
+    sender_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    receiver_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
+    total_amount BIGINT NOT NULL CHECK (total_amount > 0),
+    tx_timestamp TIMESTAMPTZ NOT NULL,
+    nonce TEXT,
+    sender_signature TEXT,
+    message TEXT,
+    is_offline BOOLEAN NOT NULL DEFAULT false,
+    status TEXT DEFAULT 'accepted' CHECK (status IN ('accepted', 'pending', 'failed', 'flagged')),
+    synced_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 6. Create Bond Redemptions Table
 CREATE TABLE bond_redemptions (
     bond_id TEXT PRIMARY KEY REFERENCES issued_bonds(bond_id) ON DELETE CASCADE,
-    tx_id TEXT NOT NULL,
+    tx_id TEXT NOT NULL REFERENCES transactions(tx_id) ON DELETE CASCADE,
     redeemed_by UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     redeemed_from UUID REFERENCES users(user_id) ON DELETE SET NULL,
     redeemed_at TIMESTAMPTZ DEFAULT NOW(),
     batch_id TEXT NOT NULL
 );
 
--- 5. Create Transactions Audit Table
-CREATE TABLE transactions (
-    tx_id TEXT PRIMARY KEY,
-    tx_type TEXT NOT NULL DEFAULT 'P2P_OFFLINE' CHECK (tx_type IN ('P2P_OFFLINE', 'P2P_ONLINE', 'P2P_PENDING', 'BOND_LOAD', 'BOND_REVERSE')),
-    sender_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    receiver_id UUID REFERENCES users(user_id) ON DELETE SET NULL,
-    total_amount BIGINT NOT NULL CHECK (total_amount > 0),
-    tx_timestamp TIMESTAMPTZ NOT NULL,
-    nonce TEXT NOT NULL,
-    sender_signature TEXT NOT NULL,
-    message TEXT,
-    status TEXT DEFAULT 'accepted' CHECK (status IN ('accepted', 'pending', 'failed', 'flagged')),
-    synced_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- 6. Create Fraud Flags Table
+-- 7. Create Fraud Flags Table
 CREATE TABLE fraud_flags (
-    flag_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    flag_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     tx_id TEXT REFERENCES transactions(tx_id) ON DELETE CASCADE,
     bond_id TEXT REFERENCES issued_bonds(bond_id) ON DELETE CASCADE,
     flag_type TEXT NOT NULL CHECK (flag_type IN ('DOUBLE_SPEND', 'VELOCITY', 'REVIEW')),
     severity TEXT NOT NULL CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     details JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ
 );
 
--- 7. Create Sync Batches Tracking Table
+-- 8. Create Sync Batches Tracking Table
 CREATE TABLE sync_batches (
     batch_id TEXT PRIMARY KEY,
     user_id UUID NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
     submitted_at TIMESTAMPTZ NOT NULL,
-    processed_at TIMESTAMPTZ DEFAULT NOW(),
+    processed_at TIMESTAMPTZ,
     result JSONB
 );
+
+-- 9. Create System Config Table
+CREATE TABLE system_config (
+    config_key TEXT PRIMARY KEY,
+    config_value TEXT NOT NULL,
+    description TEXT,
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Seed System configurations
+INSERT INTO system_config (config_key, config_value, description) VALUES
+('min_denomination', '5', 'Minimum bond denomination in NPR'),
+('max_offline_capacity', '10000', 'Maximum offline bond capacity in NPR per user'),
+('qr_switching_delay', '333', 'Delay in milliseconds between switching QR frames in multi-QR carousel'),
+('max_bonds_per_request', '50', 'Maximum number of bonds that can be generated in a single issue request'),
+('bond_ttl_days', '30', 'Default bond validity duration in days')
+ON CONFLICT (config_key) DO UPDATE SET
+  config_value = EXCLUDED.config_value,
+  description = EXCLUDED.description;
 ```
 
 ### 3.2 Client-Side SQLite Schema
@@ -147,48 +183,48 @@ export async function initializeLocalDatabase() {
   const db = await SQLite.openDatabaseAsync('bondpay.db');
   
   await db.execAsync(`
-    PRAGMA foreign_keys = ON;
-
     CREATE TABLE IF NOT EXISTS bonds (
-        bond_id TEXT PRIMARY KEY,
-        value INTEGER NOT NULL,
-        owner_id TEXT NOT NULL,
-        current_owner_id TEXT NOT NULL,
-        issued_at INTEGER NOT NULL,
-        expires_at INTEGER NOT NULL,
-        issued_by_server TEXT NOT NULL,
-        server_signature TEXT NOT NULL,
-        status TEXT DEFAULT 'available' CHECK (status IN ('available', 'spent', 'received_pending_sync', 'failed', 'frozen')),
-        local_tx_id TEXT,
-        received_at INTEGER
-    );
-
-    CREATE TABLE IF NOT EXISTS transactions (
-        tx_id TEXT PRIMARY KEY,
-        sender_id TEXT NOT NULL,
-        receiver_id TEXT NOT NULL,
-        total_amount INTEGER NOT NULL,
-        timestamp INTEGER NOT NULL,
-        nonce TEXT NOT NULL,
-        sender_public_key TEXT NOT NULL,
-        sender_signature TEXT NOT NULL,
-        role TEXT NOT NULL CHECK (role IN ('sender', 'receiver')),
-        sync_status TEXT DEFAULT 'pending' CHECK (sync_status IN ('pending', 'synced', 'rejected', 'flagged')),
-        message TEXT,
-        created_at INTEGER DEFAULT (strftime('%s','now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS transaction_bonds (
-        tx_id TEXT NOT NULL,
-        bond_id TEXT NOT NULL,
-        direction TEXT NOT NULL CHECK (direction IN ('outgoing', 'incoming')),
-        PRIMARY KEY (tx_id, bond_id),
-        FOREIGN KEY(tx_id) REFERENCES transactions(tx_id) ON DELETE CASCADE,
-        FOREIGN KEY(bond_id) REFERENCES bonds(bond_id) ON DELETE CASCADE
+      bond_id           TEXT PRIMARY KEY,
+      value             INTEGER NOT NULL,
+      owner_id          TEXT NOT NULL,
+      issued_at         INTEGER NOT NULL,
+      expires_at        INTEGER NOT NULL,
+      issued_by_server  TEXT NOT NULL,
+      server_signature  TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'available',
+      local_tx_id       TEXT,
+      received_at       INTEGER,
+      created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_bonds_status ON bonds(status);
-    CREATE INDEX IF NOT EXISTS idx_tx_sync ON transactions(sync_status);
+    CREATE INDEX IF NOT EXISTS idx_bonds_owner ON bonds(owner_id);
+
+    CREATE TABLE IF NOT EXISTS transactions (
+      tx_id              TEXT PRIMARY KEY,
+      sender_id          TEXT NOT NULL,
+      receiver_id        TEXT NOT NULL,
+      total_amount       INTEGER NOT NULL,
+      timestamp          INTEGER NOT NULL,
+      nonce              TEXT NOT NULL,
+      sender_public_key  TEXT NOT NULL,
+      sender_signature   TEXT NOT NULL,
+      role               TEXT NOT NULL,
+      sync_status        TEXT NOT NULL DEFAULT 'pending',
+      synced_at          INTEGER,
+      rejection_reason   TEXT,
+      message            TEXT,
+      created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tx_sync_status ON transactions(sync_status);
+
+    CREATE TABLE IF NOT EXISTS transaction_bonds (
+      tx_id     TEXT NOT NULL,
+      bond_id   TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      PRIMARY KEY (tx_id, bond_id)
+    );
   `);
 }
 ```
@@ -224,46 +260,10 @@ export async function generateUserKeyPair(userId: string): Promise<string> {
 }
 ```
 
-### 4.2 PBKDF2 Private Key Encryption & Backup
-To facilitate lost-device recovery, encrypt the private key using an iterations-stretched key Derived from the password and save it on the server.
+### 4.2 Local Key Storage & Future Onboarding Backup
+In the current MVP implementation, private keys are generated and stored exclusively within the local hardware Secure Keystore (`expo-secure-store`). This prevents access to the raw key material from outside the application context.
 
-```typescript
-import QuickCrypto from 'react-native-quick-crypto';
-
-export async function encryptAndBackupKey(password: string, privateKeyHex: string) {
-  // 1. Generate random salt
-  const salt = QuickCrypto.randomBytes(16).toString('hex');
-  
-  // 2. Derive 256-bit key using PBKDF2
-  const derivedKey = QuickCrypto.pbkdf2Sync(
-    password,
-    salt,
-    100000, // Enforce 100k iterations
-    32,
-    'sha256'
-  );
-
-  // 3. Encrypt Private Key bytes using AES-256-GCM
-  const iv = QuickCrypto.randomBytes(12);
-  const cipher = QuickCrypto.createCipheriv('aes-256-gcm', derivedKey, iv);
-  
-  let encrypted = cipher.update(privateKeyHex, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
-  
-  const authTag = cipher.getAuthTag().toString('hex');
-
-  const payload = JSON.stringify({
-    iv: iv.toString('hex'),
-    authTag: authTag,
-    ciphertext: encrypted
-  });
-
-  return {
-    encryptedKeyBackup: payload,
-    keyBackupSalt: salt
-  };
-}
-```
+*   **Production Enhancement Note (Onboarding Recovery)**: Remote password-based key backup (using **PBKDF2** key stretching with 100,000 iterations to derive an `AES-256-GCM` encryption key) is planned for the production roadmap to facilitate recovery if a device is lost or damaged. Currently, raw backup functions are omitted to maintain maximum compatibility with core React Native environments.
 
 ---
 
@@ -371,32 +371,37 @@ export function breakDenominations(amount: number): number[] {
 ```
 
 ### 6.2 Client-Side Subset-Sum Exact Change Solver
-When an offline payment of target $T$ is initiated, solve the subset-sum exact-change matching index to identify which bonds in SQLite should be marked `spent`.
+When an offline payment of target $T$ is initiated, the client runs a backtracking subset-sum solver with memoization to find an exact combination of bonds in SQLite, which will then be marked as `spent`.
 
 ```typescript
 interface BondModel {
-  bondId: string;
+  bond_id: string;
   value: number;
 }
 
-export function solveExactChange(availableBonds: BondModel[], targetAmount: number): BondModel[] | null {
-  // DP array stores indices of selected bonds matching the specific sum
-  const dp: (number[] | null)[] = new Array(targetAmount + 1).fill(null);
-  dp[0] = []; // 0 Paisa needs 0 bonds
-
-  for (let i = 0; i < availableBonds.length; i++) {
-    const bondVal = availableBonds[i].value;
-    for (let w = targetAmount; w >= bondVal; w--) {
-      if (dp[w - bondVal] !== null && dp[w] === null) {
-        dp[w] = [...dp[w - bondVal]!, i];
-      }
+export function findExactChange(bondsList: BondModel[], target: number): BondModel[] | null {
+  const memo = new Map<string, BondModel[] | null>();
+  
+  const search = (index: number, currentTarget: number): BondModel[] | null => {
+    if (currentTarget === 0) return [];
+    if (index >= bondsList.length || currentTarget < 0) return null;
+    
+    const key = `${index}-${currentTarget}`;
+    if (memo.has(key)) return memo.get(key)!;
+    
+    const withCurrent = search(index + 1, currentTarget - bondsList[index].value);
+    if (withCurrent !== null) {
+      const result = [bondsList[index], ...withCurrent];
+      memo.set(key, result);
+      return result;
     }
-  }
-
-  const selectedIndices = dp[targetAmount];
-  if (!selectedIndices) return null;
-
-  return selectedIndices.map(idx => availableBonds[idx]);
+    
+    const withoutCurrent = search(index + 1, currentTarget);
+    memo.set(key, withoutCurrent);
+    return withoutCurrent;
+  };
+  
+  return search(0, target);
 }
 ```
 
@@ -405,39 +410,24 @@ export function solveExactChange(availableBonds: BondModel[], targetAmount: numb
 ## 7. Phase 5: Client-Side BLE Services
 
 ### 7.1 Peripheral / Advertising Service (Receiver)
-The receiver starts advertising a session and registers a GATT database handler to collect data segments.
+The receiver starts advertising a session and registers callbacks to handle connection state changes and process incoming data segments.
 
 ```typescript
-import { BleManager } from 'react-native-ble-plx';
+import { BLEService, BLEReceiverCallbacks } from './ble.service';
 
-export class BLEPaymentReceiver {
-  private manager: BleManager;
-  private assembledBuffer: Uint8Array = new Uint8Array(0);
-  private expectedChunks = 0;
-  private receivedCount = 0;
-  private checksum = 0;
-
-  constructor() {
-    this.manager = new BleManager();
-  }
-
-  async startPaymentSession(receiverId: string, amount: number, sessionUUID: string) {
-    // 1. Begin BLE Advertising (peripheral mode config)
-    // Custom native plugin exposes peripheral advertisement interface
-    await this.manager.startAdvertising(sessionUUID, {
-      localName: `BondPay-${receiverId.slice(0,4)}`,
-      connectable: true
+export class ReceiveScreen {
+  // Initiating the session when QR is generated:
+  async setupBLEAdvertiser(sessionId: string) {
+    await BLEService.startPeripheralSession(sessionId, {
+      onStateChange: (state: string, percent: number) => {
+        // Update local progress indicators
+        this.setState({ bleState: state, blePercent: percent });
+      },
+      onPayloadReceived: async (payload: string) => {
+        // Validate payload, verify signatures, execute SQLite transaction
+        return await this.handlePaymentReceived(payload);
+      }
     });
-
-    // 2. Open GATT Server and set callbacks for Control & Data Characteristics
-    this.setupGATTDatabase(sessionUUID);
-  }
-
-  private setupGATTDatabase(sessionUUID: string) {
-    // Set up characteristic write handlers
-    // Characteristic 002 (Control): Processes stage transitions
-    // Characteristic 003 (Data Stream): Accumulates packet buffers
-    // On payload completion -> verify checksum -> execute local acceptance sqlite transaction
   }
 }
 ```

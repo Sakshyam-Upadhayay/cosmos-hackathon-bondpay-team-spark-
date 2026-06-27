@@ -199,14 +199,15 @@ BondPay utilizes the Ed25519 elliptic curve digital signature algorithm over RSA
    - **Private Key**: Saved in `expo-secure-store` using device hardware security (Android Keystore / Apple Secure Enclave). Raw bytes cannot be extracted.
    - **Public Key**: Uploaded to the database during signup to verify that user's signatures during sync.
 
-### 6.3 PBKDF2 Private Key Recovery
-To solve the stolen or broken phone challenge, user private keys are backed up to the server in an encrypted format.
+### 6.3 Future Production Roadmap: PBKDF2 Private Key Recovery
+To solve the stolen or broken phone challenge in a production environment, user private keys are planned to be backed up to the server in an encrypted format.
 1. The user inputs their account password (used as the seed).
-2. The client derives an encryption key from the password using **PBKDF2** (Password-Based Key Derivation Function 2) with a unique salt (stored on the server) and 100,000 iterations:
-   $$K_{derive} = PBKDF2(password, salt, iterations=100000, keyLen=32)$$
-3. The client encrypts the user's private key bytes using **AES-256-GCM** with the derived key $K_{derive}$.
+2. The client derives an encryption key from the password using **PBKDF2** (Password-Based Key Derivation Function 2) with a unique salt (stored on the server) and 100,000 iterations.
+3. The client encrypts the user's private key bytes using **AES-256-GCM** with the derived key.
 4. The encrypted private key payload + GCM auth tag + IV is stored on the server's `users` table.
-5. On a new device, after registering a new `active_device_id` via force login, the encrypted payload is downloaded, decrypted locally using $K_{derive}$ derived from the password, and stored securely in the local Keystore.
+5. On a new device, after registering a new `active_device_id` via force login, the encrypted payload is downloaded, decrypted locally using the key derived from the password, and stored securely in the local Keystore.
+
+*Note: In the current MVP version, private keys are local-only and stored securely in the device hardware enclave (`expo-secure-store`) with biometric restrictions to simplify dependencies.*
 
 ### 6.4 SHA-256 Hashing & Payload Binding
 Before signing, JSON strings are structured, sorted, and hashed using SHA-256. 
@@ -583,8 +584,8 @@ sequenceDiagram
 ### 9.1 Phone Stolen/Broken (Private Key Recovery)
 - **Problem**: Ed25519 private keys are stored locally. If a device is lost, the offline bonds are trapped.
 - **Solution 1: Single Active Device (Force Login)**: If a user logs into a new device, the server checks the `active_device_id`. If it differs, a **Force Login** is initiated. This automatically revokes all user bonds (`status = 'revoked'`) on the server and credits their face values back to the user's `online_balance`.
-- **Solution 2: PBKDF2 Backup**: The user's key pair is encrypted locally using an AES-256-GCM key derived from their password via PBKDF2 (100,000 iterations). The encrypted backup is stored on the server and recovered during onboarding.
-- **Solution 3: Biometric Spending Confirmation**: Senders must complete a local biometric check (FaceID/Fingerprint) before signing and generating payment QR codes, preventing unauthorized spending on stolen devices.
+- **Solution 2: PBKDF2 Backup (Future Roadmap)**: The user's key pair is planned to be encrypted locally using an AES-256-GCM key derived from their password via PBKDF2 (100,000 iterations). The encrypted backup will be stored on the server and recovered during onboarding (planned for future release).
+- **Solution 3: Biometric Spending Confirmation**: Senders must complete a local biometric check (FaceID/Fingerprint) before signing and generating payment payloads, preventing unauthorized spending on stolen devices.
 
 ### 9.2 The A → B → C Offline Chain (Double-Spend prevention)
 - **Problem**: If A pays B offline, and B immediately pays C offline with the same bond, B can double-spend by syncing their balance before C.
@@ -715,63 +716,48 @@ CREATE TABLE system_config (
 ```sql
 -- Bonds Table
 CREATE TABLE IF NOT EXISTS bonds (
-    bond_id TEXT PRIMARY KEY,
-    value INTEGER NOT NULL,
-    owner_id TEXT NOT NULL,
-    current_owner_id TEXT NOT NULL,
-    issued_at INTEGER NOT NULL,
-    expires_at INTEGER NOT NULL,
-    issued_by_server TEXT NOT NULL,
-    server_signature TEXT NOT NULL,
-    status TEXT DEFAULT 'available',
-    local_tx_id TEXT,
-    received_at INTEGER,
-    created_at INTEGER DEFAULT (strftime('%s','now'))
+    bond_id           TEXT PRIMARY KEY,
+    value             INTEGER NOT NULL,
+    owner_id          TEXT NOT NULL,
+    issued_at         INTEGER NOT NULL,
+    expires_at        INTEGER NOT NULL,
+    issued_by_server  TEXT NOT NULL,
+    server_signature  TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'available',
+    local_tx_id       TEXT,
+    received_at       INTEGER,
+    created_at        INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_bonds_status ON bonds(status);
-CREATE INDEX IF NOT EXISTS idx_bonds_owner ON bonds(current_owner_id);
+CREATE INDEX IF NOT EXISTS idx_bonds_owner ON bonds(owner_id);
 
 -- Transactions Table
 CREATE TABLE IF NOT EXISTS transactions (
-    tx_id TEXT PRIMARY KEY,
-    sender_id TEXT NOT NULL,
-    receiver_id TEXT NOT NULL,
-    total_amount INTEGER NOT NULL,
-    timestamp INTEGER NOT NULL,
-    nonce TEXT NOT NULL,
-    sender_public_key TEXT NOT NULL,
-    sender_signature TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('sender', 'receiver')),
-    sync_status TEXT DEFAULT 'pending',
-    synced_at INTEGER,
-    rejection_reason TEXT,
-    message TEXT,
-    created_at INTEGER DEFAULT (strftime('%s','now'))
+    tx_id              TEXT PRIMARY KEY,
+    sender_id          TEXT NOT NULL,
+    receiver_id        TEXT NOT NULL,
+    total_amount       INTEGER NOT NULL,
+    timestamp          INTEGER NOT NULL,
+    nonce              TEXT NOT NULL,
+    sender_public_key  TEXT NOT NULL,
+    sender_signature   TEXT NOT NULL,
+    role               TEXT NOT NULL,
+    sync_status        TEXT NOT NULL DEFAULT 'pending',
+    synced_at          INTEGER,
+    rejection_reason   TEXT,
+    message            TEXT,
+    created_at         INTEGER NOT NULL DEFAULT (strftime('%s','now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tx_sync_status ON transactions(sync_status);
 
 -- Transaction Bonds Joint Table
 CREATE TABLE IF NOT EXISTS transaction_bonds (
-    tx_id TEXT NOT NULL,
-    bond_id TEXT NOT NULL,
-    direction TEXT NOT NULL CHECK (direction IN ('outgoing', 'incoming')),
-    PRIMARY KEY (tx_id, bond_id),
-    FOREIGN KEY(tx_id) REFERENCES transactions(tx_id) ON DELETE CASCADE,
-    FOREIGN KEY(bond_id) REFERENCES bonds(bond_id) ON DELETE CASCADE
-);
-
--- Sync Log Table
-CREATE TABLE IF NOT EXISTS sync_log (
-    batch_id TEXT PRIMARY KEY,
-    submitted_at INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    tx_count INTEGER NOT NULL,
-    accepted INTEGER,
-    rejected INTEGER,
-    flagged INTEGER,
-    error_message TEXT
+    tx_id     TEXT NOT NULL,
+    bond_id   TEXT NOT NULL,
+    direction TEXT NOT NULL,
+    PRIMARY KEY (tx_id, bond_id)
 );
 ```
 
@@ -912,6 +898,16 @@ CREATE TABLE IF NOT EXISTS sync_log (
 | 409 | `DOUBLE_SPEND` | Bond ID is already recorded in the `bond_redemptions` table. |
 | 409 | `DEVICE_CONFLICT` | Device ID does not match active_device_id. |
 
+### 11.6 Additional Wallet & System Operations
+The following endpoints and automated routines exist in the backend system to facilitate balance adjustments and configuration sync:
+
+- **`POST /wallet/topup`**: Allows users to manually add balance to their `online_balance` (primarily utilized in MVP development and validation).
+- **`POST /wallet/reverse-bond`**: Allows active, unspent bonds to be revoked/reversed online and converted back into online balance, marking the bond as `revoked`.
+- **`POST /wallet/transfer-pending`**: Used in Mode 2 (Online to Offline) payments. Deducts the sender's online balance and creates a signed `pending_pickups` ticket with a unique 6-character code.
+- **`POST /wallet/claim-pending`**: Used by the receiver to claim the pending online transfer once they regain internet connectivity, crediting the receiver's `online_balance`.
+- **`GET /server/config`**: Dynamically fetches system configurations (minimum denomination, maximum capacity, default TTL, max bonds per request) from the PostgreSQL database.
+- **Automatic Expiry Bond Refunds**: When a user queries their active bonds via `GET /bonds/active`, the server automatically checks for bonds that have passed their `expires_at` date, flags them as `expired`, and automatically refunds the values back to the user's `online_balance` inside a secure database transaction, recording a `BOND_REFUND` log.
+
 ---
 
 ## 12. Frontend Services & Architectural Components
@@ -930,12 +926,11 @@ Manages cryptographic functions:
 - **`signTransaction(data, userId)`**: Signs SHA-256 hash of transactions inside the Secure Enclave.
 - **`verifyServerBondSignature(...)` & `verifySenderSignature(...)`**: Evaluates Ed25519 inputs against public keys offline.
 
-### 12.3 BLECommunicationService (`ble.service.ts`)
-Responsible for offline transport of transactions:
-- **`startAdvertising(receiverId, amount)`**: Advertises a temporary BLE Service UUID containing session initiation metadata and handles socket creation.
-- **`startDiscovery(targetSessionUUID)`**: Scans for advertisements matching the target UUID scanned from the optical QR code. Connects automatically.
-- **`sendPayload(payload)`**: Splits payload into sequential packets, handles retransmissions on NACK or timeout, and verifies receipt of stage signatures.
-- **`receivePayload()`**: Accumulates incoming chunks on a temporary BLE characteristic, verifies checksum validation, updates transfer progress hooks, and saves to SQLite.
+### 12.3 BLEService (`ble.service.ts`)
+Responsible for managing the offline P2P transport of transactions over Bluetooth:
+- **`startPeripheralSession(sessionId, callbacks)`**: Initializes a GATT peripheral server, starts BLE advertisement for the session, and registers callbacks for state changes and incoming payload receipt.
+- **`stopPeripheralSession()`**: Terminates the active peripheral advertisement session and clears local references.
+- **`sendPayloadOverBLE(sessionId, payload, onProgress)`**: Acts as a GATT client (Central). Connects to the peripheral, negotiates MTU, triggers handshake/metadata stages on the Control Characteristic, segments the JSON payload, streams packets sequentially over the Data Characteristic, and awaits the final verification ACK before disconnecting.
 
 ---
 
