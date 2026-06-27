@@ -240,3 +240,30 @@ export async function transactionExists(txId: string): Promise<boolean> {
   );
   return !!result;
 }
+
+export async function getAllTransactions(userId: string): Promise<Transaction[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<any>(
+    `SELECT tx_id as txId, sender_id as senderId, receiver_id as receiverId,
+            total_amount as totalAmount, timestamp, nonce, sender_public_key as senderPublicKey,
+            sender_signature as senderSignature, role, sync_status as syncStatus, message, created_at as createdAt
+     FROM transactions 
+     WHERE sender_id = ? OR receiver_id = ?
+     ORDER BY timestamp DESC`,
+    [userId, userId]
+  );
+  return rows;
+}
+
+export async function getAllBonds(userId: string): Promise<Bond[]> {
+  const database = await getDatabase();
+  const rows = await database.getAllAsync<any>(
+    `SELECT bond_id as bondId, value, owner_id as ownerId, current_owner_id as currentOwnerId,
+            issued_at as issuedAt, expires_at as expiresAt, issued_by_server as issuedByServer,
+            server_signature as serverSignature, status, local_tx_id as localTxId, received_at as receivedAt
+     FROM bonds 
+     WHERE current_owner_id = ?`,
+    [userId]
+  );
+  return rows;
+}

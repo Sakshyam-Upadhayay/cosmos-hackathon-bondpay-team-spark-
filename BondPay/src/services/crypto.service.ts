@@ -129,3 +129,20 @@ export async function decryptAndRecoverKey(
     return null;
   }
 }
+
+export async function signBondWithServerKey(
+  bondId: string,
+  value: number,
+  ownerId: string,
+  issuedAt: number,
+  expiresAt: number
+): Promise<string> {
+  const SERVER_PRIVATE_KEY_HEX = '12d6510c36a8fd26dd0050d75b5256560c1742092f4795d597968499f9fbdc1e';
+  const issuedAtISO = new Date(issuedAt * 1000).toISOString();
+  const expiresAtISO = new Date(expiresAt * 1000).toISOString();
+  const bondPayload = `${bondId}:${value}:${ownerId}:${issuedAtISO}:${expiresAtISO}:v1`;
+  const payloadBytes = new TextEncoder().encode(bondPayload);
+  const hash = await ed.esh256(payloadBytes);
+  const signature = await ed.signAsync(hash, Buffer.from(SERVER_PRIVATE_KEY_HEX, 'hex'));
+  return Buffer.from(signature).toString('base64');
+}
