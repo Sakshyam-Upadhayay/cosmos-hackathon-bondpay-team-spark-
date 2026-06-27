@@ -189,20 +189,26 @@ export class BLEService {
       if (bridgeActive) {
         // Wait for receiver to process and confirm via local server bridge status
         let attempts = 0;
-        const maxAttempts = 15; // 15 seconds timeout
+        const maxAttempts = 30; // 30 seconds timeout (receiver needs time for crypto + DB)
         
         while (attempts < maxAttempts) {
-          const res = await axios.get(`${API_URL}/server/ble-session/status`, {
-            params: { sessionId }
-          });
-          
-          if (res.data && res.data.status === 'completed') {
-            onProgress('Received final transaction ACK. Disconnecting...', 95);
-            await delay(500);
-            onProgress('Completed', 100);
-            return;
-          } else if (res.data && res.data.status === 'failed') {
-            throw new Error('Receiver rejected the transaction signature.');
+          try {
+            const res = await axios.get(`${API_URL}/server/ble-session/status`, {
+              params: { sessionId }
+            });
+            
+            if (res.data && res.data.status === 'completed') {
+              onProgress('Received final transaction ACK. Disconnecting...', 95);
+              await delay(500);
+              onProgress('Completed', 100);
+              return;
+            } else if (res.data && res.data.status === 'failed') {
+              throw new Error('Receiver rejected the transaction signature.');
+            }
+          } catch (pollErr: any) {
+            // Only rethrow if it's our own thrown error, not a network issue
+            if (pollErr.message?.includes('rejected')) throw pollErr;
+            addLog('WARN', 'BLEService.sendPayloadOverBLE', `Status poll error (attempt ${attempts + 1}): ${pollErr.message}`);
           }
           
           await delay(1000);
@@ -248,46 +254,67 @@ export class BLEService {
     const { addLog } = useLogStore.getState();
     const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+    // CRITICAL: Capture sessionId NOW before the callback can clear it via stopPeripheralSession()
+    const capturedSessionId = this.activePeripheralSessionId;
+    addLog('INFO', 'BLEService.processIncomingPayloadSimulated', `Processing payload for session: ${capturedSessionId}`);
+
+    // Helper to post completion status with retry
+    const postCompletion = async (success: boolean) => {
+      if (!capturedSessionId) {
+        addLog('WARN', 'BLEService.processIncomingPayloadSimulated', 'No sessionId captured, skipping completion POST');
+        return;
+      }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          await axios.post(`${API_URL}/server/ble-session/complete`, {
+            sessionId: capturedSessionId,
+            success
+          });
+          addLog('INFO', 'BLEService.processIncomingPayloadSimulated', `Completion POST succeeded (attempt ${attempt + 1})`);
+          return;
+        } catch (err: any) {
+          addLog('WARN', 'BLEService.processIncomingPayloadSimulated', `Completion POST failed (attempt ${attempt + 1}): ${err.message}`);
+          if (attempt < 2) await delay(500);
+        }
+      }
+    };
+
     try {
-      // Simulate initial connect
+      // Brief visual progress updates (reduced delays to prevent timeout)
       callbacks.onStateChange('Sender detected. Connecting...', 10);
-      await delay(800);
+      await delay(300);
       callbacks.onStateChange('Establishing GATT link...', 25);
-      await delay(800);
+      await delay(300);
       callbacks.onStateChange('Handshake initiated...', 40);
-      await delay(600);
+      await delay(200);
 
       const rawPayloadBytes = new Uint8Array(Buffer.from(payload, 'utf-8'));
       const MTU = 100;
       const totalChunks = Math.ceil(rawPayloadBytes.length / MTU);
       
       callbacks.onStateChange(`Metadata received: expecting ${totalChunks} chunks.`, 50);
-      await delay(600);
+      await delay(200);
 
-      // Simulate chunk progression
+      // Brief chunk progression animation
       for (let i = 0; i < totalChunks; i++) {
         const chunkPercent = 60 + Math.round((i / totalChunks) * 20); // 60% to 80%
         callbacks.onStateChange(`Receiving packet ${i + 1} of ${totalChunks}...`, chunkPercent);
-        await delay(250);
+        await delay(100);
       }
 
       callbacks.onStateChange('Assembling packets and verifying...', 85);
-      await delay(800);
+      await delay(300);
 
       // Trigger actual verification and save to SQLite
       const saveSuccess = await callbacks.onPayloadReceived(payload);
 
-      // Update bridge status on server
-      try {
-        await axios.post(`${API_URL}/server/ble-session/complete`, {
-          sessionId: this.activePeripheralSessionId,
-          success: saveSuccess
-        });
-      } catch (err) {}
+      // Post completion status USING the captured sessionId (not this.activePeripheralSessionId
+      // which may have been cleared by stopPeripheralSession() inside the callback)
+      await postCompletion(saveSuccess);
 
       if (saveSuccess) {
         callbacks.onStateChange('Transaction accepted! Disconnecting...', 95);
-        await delay(500);
+        await delay(300);
         callbacks.onStateChange('Completed', 100);
       } else {
         callbacks.onStateChange('Error: Transaction verification failed.', 0);
@@ -296,12 +323,7 @@ export class BLEService {
     } catch (e: any) {
       addLog('ERROR', 'BLEService.processIncomingPayloadSimulated', `Verification error: ${e.message}`);
       callbacks.onStateChange(`Error: ${e.message}`, 0);
-      try {
-        await axios.post(`${API_URL}/server/ble-session/complete`, {
-          sessionId: this.activePeripheralSessionId,
-          success: false
-        });
-      } catch (err) {}
+      await postCompletion(false);
     }
   }
 
