@@ -39,6 +39,16 @@
       "public_key": null,
       "online_balance": 100000,
       "active_device_id": "device-xyz"
+    },
+    {
+      "user_id": "d48ff7d3-da5f-421f-a1a3-7c1ce1d3de86",
+      "phone_number": "9841372587",
+      "email": "test-1782593621659@example.com",
+      "full_name": "Test User",
+      "password_hash": "$2b$10$5GgQqFp1JHR.YaOS3HvG6OO7DV8KD/xUzowtK3VZjH.iyKqMXloY.",
+      "public_key": null,
+      "online_balance": 100000,
+      "active_device_id": "device-xyz"
     }
   ],
   "issued_bonds": [],

@@ -83,7 +83,16 @@ const runMockQuery = (text: string, params: any[] = []): { rows: any[]; rowCount
     };
     dbMemory.users.push(newUser);
     saveDB();
-    return { rows: [{ user_id: newUser.user_id }], rowCount: 1 };
+    return { 
+      rows: [{ 
+        user_id: newUser.user_id,
+        full_name: newUser.full_name,
+        email: newUser.email,
+        phone_number: newUser.phone_number,
+        public_key: newUser.public_key
+      }], 
+      rowCount: 1 
+    };
   }
 
   // 3. Auth: Login lookup by email or phone
