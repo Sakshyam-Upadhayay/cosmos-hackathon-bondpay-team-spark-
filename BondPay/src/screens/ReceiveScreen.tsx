@@ -12,8 +12,6 @@ import { SyncService } from '../services/sync.service';
 import { MultiQRScanner } from '../components/MultiQRScanner';
 import { ConfigService, SystemConfig } from '../services/config.service';
 
-import { BLEService } from '../services/ble.service';
-
 import { API_URL } from '../services/config.service';
 
 // Embedded default server public key (will be verified dynamically if possible)
@@ -34,25 +32,12 @@ export const ReceiveScreen = () => {
   const [polling, setPolling] = useState(false);
   const [sysConfig, setSysConfig] = useState<SystemConfig | null>(null);
 
-  // Bluetooth states
-  const [bleSessionId, setBleSessionId] = useState<string | null>(null);
-  const [bleState, setBleState] = useState<string>('');
-  const [blePercent, setBlePercent] = useState<number>(0);
-
   useEffect(() => {
     const loadConfigs = async () => {
       const config = await ConfigService.fetchConfigs();
       setSysConfig(config);
     };
     loadConfigs();
-
-    // Request BLE permissions early
-    BLEService.requestBluetoothPermissions();
-
-    // Clean up BLE on unmount
-    return () => {
-      BLEService.stopPeripheralSession();
-    };
   }, []);
 
   // Mode 1: Poll for balance change if receiving online
@@ -88,23 +73,7 @@ export const ReceiveScreen = () => {
       Alert.alert('Invalid Amount', 'Please enter a valid amount.');
       return;
     }
-
-    const sessionId = `bp-ble-${userId?.substring(0, 5)}-${Date.now()}`;
-    setBleSessionId(sessionId);
-    setBleState('Advertising BLE Service...');
-    setBlePercent(0);
     setQrGenerated(true);
-
-    // Initialize BLE peripheral session
-    BLEService.startPeripheralSession(sessionId, {
-      onStateChange: (state, percent) => {
-        setBleState(state);
-        setBlePercent(percent);
-      },
-      onPayloadReceived: async (data) => {
-        return await handlePaymentReceived(data);
-      }
-    });
   };
 
   const handleStartScan = () => {
@@ -117,13 +86,13 @@ export const ReceiveScreen = () => {
     setValidatorMode(false);
   };
 
-  // Called when MultiQR progressive scan or BLE payload receipt completes
-  const handlePaymentReceived = async (data: string): Promise<boolean> => {
-    if (isProcessingRef.current) return false;
+  // Called when MultiQR progressive scan completes
+  const handlePaymentReceived = async (data: string) => {
+    if (isProcessingRef.current) return;
     isProcessingRef.current = true;
     
     const { addLog } = useLogStore.getState();
-    addLog('INFO', 'ReceiveScreen', 'Payment payload received', { rawData: data });
+    addLog('INFO', 'ReceiveScreen', 'Payment payload received by scanner', { rawData: data });
 
     try {
       const payload = JSON.parse(data);
@@ -135,7 +104,7 @@ export const ReceiveScreen = () => {
         if (payload.amount !== demandedAmount) {
           Alert.alert('Invalid Transaction', `Amount mismatch. Expected रू ${demandedAmount}, got रू ${payload.amount}.`);
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         // Verify Server Signature on this pickup claim
@@ -149,7 +118,7 @@ export const ReceiveScreen = () => {
         if (!isServerSigned) {
           Alert.alert('Security Alert', 'This pickup payload has an invalid server signature. Rejected.');
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         const db = await getDB();
@@ -157,7 +126,7 @@ export const ReceiveScreen = () => {
         if (existingTx.length > 0) {
           Alert.alert('Duplicate Claim', 'You have already scanned this pickup code.');
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         // Store claim in transactions as role='receiver', sync_status='pending_pickup'
@@ -175,9 +144,6 @@ export const ReceiveScreen = () => {
         
         useAppStore.getState().setBalance({ pendingOnline: pendingRes.total });
 
-        // Stop BLE peripheral since payment has been received
-        BLEService.stopPeripheralSession();
-
         // If receiver is online, trigger immediate sync/claim
         if (isOnline) {
           try {
@@ -194,7 +160,7 @@ export const ReceiveScreen = () => {
             Alert.alert('Payment Claimed!', `रू ${demandedAmount} has been claimed and added to your ONLINE balance!`, [
               { text: 'OK', onPress: () => navigation.goBack() }
             ]);
-            return true;
+            return;
           } catch (e: any) {
             console.warn('Failed to claim online immediately, will sync later.', e.message);
           }
@@ -203,7 +169,7 @@ export const ReceiveScreen = () => {
         Alert.alert('Pickup Saved Offline', `रू ${demandedAmount} will be credited to your online balance once you go online.`, [
           { text: 'OK', onPress: () => navigation.goBack() }
         ]);
-        return true;
+        return;
       }
 
       // Handle MODE 3 & 4: Offline Bond Transfer Receipt
@@ -212,14 +178,14 @@ export const ReceiveScreen = () => {
           addLog('ERROR', 'ReceiveScreen', 'Receiver ID mismatch', { expected: userId, received: payload.receiverId });
           Alert.alert('Invalid Transaction', 'This transaction is not meant for you.');
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         const demandedAmount = parseInt(amount, 10);
         if (payload.amount !== demandedAmount) {
           Alert.alert('Invalid Transaction', `Amount mismatch. Expected रू ${demandedAmount}, got रू ${payload.amount}.`);
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         // 1. Verify Server signature on EVERY bond to prevent forgery (Bug #6 Fix)
@@ -233,7 +199,7 @@ export const ReceiveScreen = () => {
           if (!isServerSigned) {
             Alert.alert('Security Alert', `Bond ${bond.id.substring(0,8)} failed server validation. Payment REJECTED.`);
             isProcessingRef.current = false;
-            return false;
+            return;
           }
 
           // Check if bond is expired
@@ -241,7 +207,7 @@ export const ReceiveScreen = () => {
           if (bond.expiresAt <= nowSec) {
             Alert.alert('Invalid Transaction', `Bond ${bond.id.substring(0,8)} has expired. Payment REJECTED.`);
             isProcessingRef.current = false;
-            return false;
+            return;
           }
         }
 
@@ -260,7 +226,7 @@ export const ReceiveScreen = () => {
           addLog('ERROR', 'ReceiveScreen', 'Signature validation failed in UI layer');
           Alert.alert('Invalid Signature', 'The sender signature is invalid.');
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         let totalBondValue = 0;
@@ -271,7 +237,7 @@ export const ReceiveScreen = () => {
         if (totalBondValue !== demandedAmount) {
            Alert.alert('Invalid Bonds', 'The provided bonds do not match the transaction amount.');
            isProcessingRef.current = false;
-           return false;
+           return;
         }
 
         const db = await getDB();
@@ -281,7 +247,7 @@ export const ReceiveScreen = () => {
         if (existingTx.length > 0) {
           Alert.alert('Duplicate', 'You have already processed this transaction.');
           isProcessingRef.current = false;
-          return false;
+          return;
         }
 
         await db.execAsync('BEGIN TRANSACTION');
@@ -298,7 +264,7 @@ export const ReceiveScreen = () => {
             await db.runAsync(`
               INSERT OR REPLACE INTO bonds (bond_id, value, owner_id, issued_at, expires_at, issued_by_server, server_signature, status, local_tx_id)
               VALUES (?, ?, ?, ?, ?, ?, ?, 'received_pending_sync', ?)
-            `, [bond.id, bond.value, bond.ownerId, bond.issuedAt, bond.expiresAt, bond.issuedByServer, bond.serverSignature, payload.txId]);
+            `, [bond.id, bond.value, userId, bond.issuedAt, bond.expiresAt, bond.issuedByServer, bond.serverSignature, payload.txId]);
 
             await db.runAsync(`
               INSERT OR IGNORE INTO transaction_bonds (tx_id, bond_id, direction) VALUES (?, ?, 'incoming')
@@ -313,9 +279,6 @@ export const ReceiveScreen = () => {
           `) as { total: number };
           useAppStore.getState().setBalance({ pendingOnline: pendingRes.total });
 
-          // Stop BLE peripheral session
-          BLEService.stopPeripheralSession();
-
           // MODE 3: Receiver is online. Immediately trigger sync for this transaction to settle on server.
           if (isOnline) {
             try {
@@ -324,7 +287,7 @@ export const ReceiveScreen = () => {
               Alert.alert('Payment Received & Synced!', `रू ${demandedAmount} has been settled and added to your ONLINE balance!`, [
                 { text: 'OK', onPress: () => navigation.goBack() }
               ]);
-              return true;
+              return;
             } catch (syncError) {
               console.warn('Immediate sync failed, queued for later background sync.');
             }
@@ -334,24 +297,20 @@ export const ReceiveScreen = () => {
           Alert.alert('Payment Received Offline!', `रू ${demandedAmount} received offline. Settle it by syncing when you are online.`, [
             { text: 'OK', onPress: () => navigation.goBack() }
           ]);
-          return true;
         } catch (e) {
           await db.execAsync('ROLLBACK');
           console.error('Failed to save incoming transaction:', e);
           Alert.alert('Error', 'Failed to save the transaction locally.');
-          return false;
         }
 
       } else {
         addLog('ERROR', 'ReceiveScreen', 'Invalid QR Code structure', { payload });
         Alert.alert('Invalid QR Code', 'The scanned QR code is not a valid transaction payload.');
-        return false;
       }
     } catch (error: any) {
       addLog('ERROR', 'ReceiveScreen', 'Failed to parse or verify QR code', { error: error.message });
       console.error(error);
       Alert.alert('Error', 'Failed to parse payment QR code.');
-      return false;
     } finally {
       isProcessingRef.current = false;
     }
@@ -362,9 +321,7 @@ export const ReceiveScreen = () => {
     name: fullName,
     pubKey: publicKey,
     amount: parseInt(amount, 10) || 0,
-    mode: isOnline ? 'online' : 'offline',
-    bleServiceUuid: 'E3F1C990-2B3A-4D78-95D9-23CE6305C001',
-    bleSessionId: bleSessionId
+    mode: isOnline ? 'online' : 'offline'
   });
 
   return (
@@ -427,30 +384,6 @@ export const ReceiveScreen = () => {
                   <Text style={[styles.pollingText, isDark && styles.darkSubtitle]}>Waiting for payment...</Text>
                 </View>
               )}
-
-              {bleSessionId && (
-                <View style={[styles.bluetoothCard, isDark && styles.darkBluetoothCard]}>
-                  <View style={styles.bluetoothHeader}>
-                    <Ionicons 
-                      name={blePercent === 100 ? "bluetooth" : "bluetooth-outline"} 
-                      size={20} 
-                      color={blePercent === 100 ? "#2ECC71" : "#2D46B9"} 
-                      style={styles.bluetoothIcon} 
-                    />
-                    <Text style={[styles.bluetoothTitle, isDark && styles.darkText]}>
-                      Bluetooth P2P Offline Link
-                    </Text>
-                  </View>
-                  <Text style={[styles.bluetoothStatus, isDark && styles.darkSubtitle]}>
-                    {bleState}
-                  </Text>
-                  {blePercent > 0 && blePercent < 100 && (
-                    <View style={styles.bluetoothProgressBg}>
-                      <View style={[styles.bluetoothProgressFill, { width: `${blePercent}%` }]} />
-                    </View>
-                  )}
-                </View>
-              )}
               
               <View style={styles.offlineActionContainer}>
                 <Text style={[styles.offlineHelperText, isDark && styles.darkSubtitle]}>
@@ -464,13 +397,7 @@ export const ReceiveScreen = () => {
                 </TouchableOpacity>
               </View>
               
-              <TouchableOpacity style={styles.changeAmountButton} onPress={() => {
-                BLEService.stopPeripheralSession();
-                setBleSessionId(null);
-                setBleState('');
-                setBlePercent(0);
-                setQrGenerated(false);
-              }}>
+              <TouchableOpacity style={styles.changeAmountButton} onPress={() => setQrGenerated(false)}>
                 <Text style={styles.changeAmountText}>Change Amount</Text>
               </TouchableOpacity>
             </View>
@@ -518,50 +445,6 @@ const styles = StyleSheet.create({
   amountDisplay: { color: '#000', fontSize: 32, fontWeight: 'bold', marginBottom: 10 },
   pollingContainer: { flexDirection: 'row', alignItems: 'center', marginVertical: 15 },
   pollingText: { marginLeft: 10, color: '#666', fontSize: 14 },
-  bluetoothCard: {
-    backgroundColor: '#F5F6FA',
-    borderRadius: 12,
-    padding: 15,
-    width: '100%',
-    marginVertical: 15,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E1E4E8',
-  },
-  darkBluetoothCard: {
-    backgroundColor: '#242526',
-    borderColor: '#3A3B3C',
-  },
-  bluetoothHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  bluetoothIcon: {
-    marginRight: 8,
-  },
-  bluetoothTitle: {
-    fontWeight: 'bold',
-    fontSize: 14,
-    color: '#2D46B9',
-  },
-  bluetoothStatus: {
-    fontSize: 12,
-    color: '#555',
-    textAlign: 'center',
-    marginBottom: 10,
-  },
-  bluetoothProgressBg: {
-    width: '100%',
-    height: 6,
-    backgroundColor: '#E1E4E8',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  bluetoothProgressFill: {
-    height: '100%',
-    backgroundColor: '#2D46B9',
-  },
   offlineActionContainer: { width: '100%', marginTop: 15, alignItems: 'center' },
   offlineHelperText: { textAlign: 'center', color: '#666', fontSize: 12, marginBottom: 15, paddingHorizontal: 10 },
   verifyButton: { flexDirection: 'row', backgroundColor: '#E74C3C', paddingVertical: 15, paddingHorizontal: 20, borderRadius: 12, width: '100%', alignItems: 'center', justifyContent: 'center' },

@@ -12,7 +12,6 @@ import { SyncService } from '../services/sync.service';
 import { ConfigService, SystemConfig } from '../services/config.service';
 import { MultiQRDisplay } from '../components/MultiQRDisplay';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { BLEService } from '../services/ble.service';
 
 import { API_URL } from '../services/config.service';
 
@@ -35,13 +34,6 @@ export const SendScreen = () => {
   const [sendMode, setSendMode] = useState<'qr' | 'phone'>('qr');
   const [phoneNumber, setPhoneNumber] = useState('');
   const [searchingUser, setSearchingUser] = useState(false);
-
-  // Bluetooth states
-  const [bleSessionId, setBleSessionId] = useState<string | null>(null);
-  const [bleServiceUuid, setBleServiceUuid] = useState<string | null>(null);
-  const [isBleSending, setIsBleSending] = useState(false);
-  const [bleProgressStep, setBleProgressStep] = useState('');
-  const [bleProgressPercent, setBleProgressPercent] = useState(0);
   
   const { userId, publicKey, jwt, fullName } = useAppStore((state) => state.user);
   const balance = useAppStore((state) => state.balance);
@@ -68,9 +60,6 @@ export const SendScreen = () => {
       setSysConfig(config);
     };
     loadConfigs();
-
-    // Request Bluetooth/BLE permissions early
-    BLEService.requestBluetoothPermissions();
   }, [userId]);
 
   const getDenominationsString = (bondsList: any[]) => {
@@ -111,56 +100,12 @@ export const SendScreen = () => {
           amount: payload.amount || 0,
           mode: payload.mode || 'offline'
         });
-        setBleSessionId(payload.bleSessionId || null);
-        setBleServiceUuid(payload.bleServiceUuid || null);
         setEditableAmount(payload.amount ? payload.amount.toString() : '');
       } else {
         Alert.alert('Invalid QR Code', 'The scanned QR code is missing required information.');
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to parse QR code.');
-    }
-  };
-
-  const resetBleState = () => {
-    setBleSessionId(null);
-    setBleServiceUuid(null);
-    setIsBleSending(false);
-    setBleProgressStep('');
-    setBleProgressPercent(0);
-  };
-
-  const sendPayloadViaBluetooth = async (payloadToSend: string, sessionId: string) => {
-    setIsBleSending(true);
-    setBleProgressStep('Searching for Bluetooth link...');
-    setBleProgressPercent(0);
-    
-    try {
-      await BLEService.sendPayloadOverBLE(sessionId, payloadToSend, (step, percent) => {
-        setBleProgressStep(step);
-        setBleProgressPercent(percent);
-      });
-      
-      setOnlineSuccess(true);
-      setIsBleSending(false);
-    } catch (err: any) {
-      console.error("BLE transfer failed:", err);
-      Alert.alert(
-        "Bluetooth Transfer Failed",
-        `${err.message || 'Unable to establish connection.'}\n\nWould you like to display the QR code instead?`,
-        [
-          { 
-            text: "Show QR Code", 
-            onPress: () => {
-              setIsBleSending(false);
-            } 
-          },
-          {
-            text: "Retry Bluetooth",
-            onPress: () => sendPayloadViaBluetooth(payloadToSend, sessionId)
-          }
-        ]
-      );
     }
   };
 
@@ -269,6 +214,7 @@ export const SendScreen = () => {
         expiresAt: res.data.expiresAt
       };
 
+      // Write transaction to local SQLite
       const db = await getDB();
       await db.runAsync(`
         INSERT OR IGNORE INTO transactions (tx_id, sender_id, receiver_id, total_amount, timestamp, nonce, sender_public_key, sender_signature, role, sync_status, message)
@@ -276,12 +222,7 @@ export const SendScreen = () => {
       `, [res.data.pickupId, userId, receiverInfo.userId, amountVal, Math.floor(Date.now() / 1000), publicKey || '', 'Online-Offline Pickup Pending']);
 
       await SyncService.fetchOnlineBalance(jwt);
-      const payloadStr = JSON.stringify(pickupPayload);
-      setReceiptPayload(payloadStr);
-
-      if (bleSessionId) {
-        await sendPayloadViaBluetooth(payloadStr, bleSessionId);
-      }
+      setReceiptPayload(JSON.stringify(pickupPayload));
     } catch (e: any) {
       console.error(e);
       Alert.alert('Transfer Pending Setup Failed', e.response?.data?.error || e.message);
@@ -418,12 +359,7 @@ export const SendScreen = () => {
         };
 
         addLog('INFO', 'SendScreen', 'Final receipt payload created', receipt);
-        const payloadStr = JSON.stringify(receipt);
-        setReceiptPayload(payloadStr);
-
-        if (bleSessionId) {
-          await sendPayloadViaBluetooth(payloadStr, bleSessionId);
-        }
+        setReceiptPayload(JSON.stringify(receipt));
 
       } catch (e: any) {
         await db.execAsync('ROLLBACK');
@@ -585,7 +521,7 @@ export const SendScreen = () => {
               <Text style={[styles.recipientId, isDark && styles.darkSubtitle]}>ID: {receiverInfo.userId.substring(0,8)}...</Text>
               <Text style={{ fontSize: 11, color: '#F39C12', fontWeight: 'bold', marginTop: 4 }}>{getWorkflowMode()}</Text>
             </View>
-            <TouchableOpacity onPress={() => { setReceiverInfo(null); handleRescan(); resetBleState(); }}>
+            <TouchableOpacity onPress={() => { setReceiverInfo(null); handleRescan(); }}>
               <Text style={styles.changeText}>Cancel</Text>
             </TouchableOpacity>
           </View>
@@ -652,58 +588,23 @@ export const SendScreen = () => {
         </View>
       ) : receiptPayload ? (
         <ScrollView contentContainerStyle={styles.receiptContainer}>
-          {isBleSending ? (
-            <View style={[styles.qrCard, isDark && styles.darkQrCard, { minHeight: 320, justifyContent: 'center', paddingVertical: 40 }]}>
-              <Ionicons name="bluetooth" size={64} color="#2D46B9" style={{ marginBottom: 15 }} />
-              <ActivityIndicator size="small" color="#2D46B9" style={{ marginBottom: 15 }} />
-              <Text style={[styles.bleProgressTitle, isDark && styles.darkText]}>
-                Sending via Bluetooth P2P
-              </Text>
-              <Text style={[styles.bleProgressStep, isDark && styles.darkSubtitle]}>
-                {bleProgressStep}
-              </Text>
-              <View style={styles.bleProgressBg}>
-                <View style={[styles.bleProgressFill, { width: `${bleProgressPercent}%` }]} />
-              </View>
-              <Text style={[styles.bleProgressPercent, isDark && styles.darkText]}>
-                {bleProgressPercent}%
-              </Text>
+          <View style={styles.successHeader}>
+            <Ionicons name="checkmark-circle" size={60} color="#4CAF50" />
+            <Text style={styles.successTitle}>Payment Processed</Text>
+            <Text style={[styles.successSub, isDark && styles.darkSubtitle]}>Show this QR code sequence to the receiver to finalize.</Text>
+          </View>
 
-              <TouchableOpacity 
-                style={[styles.verifyButton, { backgroundColor: '#7F8C8D', marginTop: 25, width: '100%' }]}
-                onPress={() => setIsBleSending(false)}
-              >
-                <Ionicons name="qr-code-outline" size={20} color="#FFF" style={{ marginRight: 8 }} />
-                <Text style={styles.verifyButtonText}>Show QR Code Instead</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <>
-              <View style={styles.successHeader}>
-                <Ionicons name="checkmark-circle" size={60} color="#4CAF50" />
-                <Text style={styles.successTitle}>Payment Processed</Text>
-                <Text style={[styles.successSub, isDark && styles.darkSubtitle]}>Show this QR code sequence to the receiver to finalize.</Text>
-              </View>
+          <View style={[styles.qrCard, isDark && styles.darkQrCard]}>
+            <MultiQRDisplay 
+              payload={receiptPayload} 
+              delayMs={sysConfig?.qr_switching_delay || 333} 
+              size={220}
+            />
+            <Text style={[styles.receiptAmount, isDark && styles.darkText]}>रू {editableAmount}</Text>
+            <Text style={[styles.receiptTo, isDark && styles.darkSubtitle]}>To: {receiverInfo?.displayName}</Text>
+          </View>
 
-              <View style={[styles.qrCard, isDark && styles.darkQrCard]}>
-                <MultiQRDisplay 
-                  payload={receiptPayload} 
-                  delayMs={sysConfig?.qr_switching_delay || 333} 
-                  size={220}
-                />
-                <Text style={[styles.receiptAmount, isDark && styles.darkText]}>रू {editableAmount}</Text>
-                <Text style={[styles.receiptTo, isDark && styles.darkSubtitle]}>To: {receiverInfo?.displayName}</Text>
-              </View>
-            </>
-          )}
-
-          <TouchableOpacity 
-            style={styles.doneButton} 
-            onPress={() => {
-              resetBleState();
-              navigation.goBack();
-            }}
-          >
+          <TouchableOpacity style={styles.doneButton} onPress={() => navigation.goBack()}>
             <Text style={styles.doneButtonText}>Done</Text>
           </TouchableOpacity>
         </ScrollView>
@@ -786,50 +687,5 @@ const styles = StyleSheet.create({
   phoneCardSub: { fontSize: 13, color: '#666', textAlign: 'center', marginBottom: 25, lineHeight: 18 },
   phoneInput: { width: '100%', backgroundColor: '#F5F6FA', color: '#000', padding: 16, borderRadius: 12, fontSize: 16, borderWidth: 1, borderColor: '#EEE', marginBottom: 20, textAlign: 'center' },
   searchBtn: { flexDirection: 'row', backgroundColor: '#2D46B9', paddingVertical: 15, width: '100%', borderRadius: 12, justifyContent: 'center', alignItems: 'center' },
-  searchBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  bleProgressTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2D46B9',
-    marginBottom: 8,
-  },
-  bleProgressStep: {
-    fontSize: 13,
-    color: '#666',
-    marginBottom: 20,
-    textAlign: 'center',
-    paddingHorizontal: 20,
-  },
-  bleProgressBg: {
-    width: '80%',
-    height: 8,
-    backgroundColor: '#E1E4E8',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  bleProgressFill: {
-    height: '100%',
-    backgroundColor: '#2D46B9',
-  },
-  bleProgressPercent: {
-    fontSize: 14,
-    fontWeight: 'bold',
-    color: '#000',
-  },
-  verifyButton: {
-    flexDirection: 'row',
-    backgroundColor: '#E74C3C',
-    paddingVertical: 15,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    width: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  verifyButtonText: {
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: 'bold',
-  },
+  searchBtnText: { color: '#FFF', fontSize: 16, fontWeight: 'bold' }
 });
