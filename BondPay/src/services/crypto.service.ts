@@ -54,7 +54,7 @@ export class CryptoService {
       if (!privKeyStr) throw new Error('Private key not found');
       const privKey = new Uint8Array(Buffer.from(privKeyStr, 'hex'));
       
-      const dataHash = sha256(new TextEncoder().encode(dataString));
+      const dataHash = sha256(new Uint8Array(Buffer.from(dataString, 'utf-8')));
       addLog('INFO', 'CryptoService.signTransaction', 'Data hashed', { hashHex: Buffer.from(dataHash).toString('hex') });
 
       const signature = await signAsync(dataHash, privKey);
@@ -70,7 +70,7 @@ export class CryptoService {
 
   static async verifyServerBondSignature(dataString: string, signatureBase64: string, serverPublicKeyBase64: string): Promise<boolean> {
     try {
-      const dataHash = sha256(new TextEncoder().encode(dataString));
+      const dataHash = sha256(new Uint8Array(Buffer.from(dataString, 'utf-8')));
       const sigBytes = new Uint8Array(Buffer.from(signatureBase64, 'base64'));
       const pubKeyBytes = new Uint8Array(Buffer.from(serverPublicKeyBase64, 'base64'));
       
@@ -89,7 +89,7 @@ export class CryptoService {
     });
 
     try {
-      const dataHash = sha256(new TextEncoder().encode(dataString));
+      const dataHash = sha256(new Uint8Array(Buffer.from(dataString, 'utf-8')));
       addLog('INFO', 'CryptoService.verifySenderSignature', 'Data hashed for verification', { hashHex: Buffer.from(dataHash).toString('hex') });
 
       const sigBytes = new Uint8Array(Buffer.from(signatureBase64, 'base64'));

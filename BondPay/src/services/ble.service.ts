@@ -109,8 +109,7 @@ export class BLEService {
 
       // Step 4: Metadata Exchange (Control Characteristic: STAGE_METADATA)
       onProgress('Exchanging transaction metadata...', 50);
-      const encoder = new TextEncoder();
-      const rawPayloadBytes = encoder.encode(payload);
+      const rawPayloadBytes = new Uint8Array(Buffer.from(payload, 'utf-8'));
       const MTU = 100; // Simulated MTU packet size for demo chunking visibility
       const totalChunks = Math.ceil(rawPayloadBytes.length / MTU);
       
@@ -185,7 +184,7 @@ export class BLEService {
         offset += chunk.length;
       }
 
-      const decodedPayload = new TextDecoder().decode(fullBytes);
+      const decodedPayload = Buffer.from(fullBytes).toString('utf-8');
       const computedCs = this.computeChecksum(decodedPayload);
 
       if (computedCs !== checksum) {

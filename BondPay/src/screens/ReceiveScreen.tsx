@@ -295,7 +295,7 @@ export const ReceiveScreen = () => {
             await db.runAsync(`
               INSERT OR REPLACE INTO bonds (bond_id, value, owner_id, issued_at, expires_at, issued_by_server, server_signature, status, local_tx_id)
               VALUES (?, ?, ?, ?, ?, ?, ?, 'received_pending_sync', ?)
-            `, [bond.id, bond.value, userId, bond.issuedAt, bond.expiresAt, bond.issuedByServer, bond.serverSignature, payload.txId]);
+            `, [bond.id, bond.value, bond.ownerId, bond.issuedAt, bond.expiresAt, bond.issuedByServer, bond.serverSignature, payload.txId]);
 
             await db.runAsync(`
               INSERT OR IGNORE INTO transaction_bonds (tx_id, bond_id, direction) VALUES (?, ?, 'incoming')

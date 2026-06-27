@@ -18,6 +18,7 @@ export const MultiQRScanner: React.FC<MultiQRScannerProps> = ({ onComplete, onCa
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const scannedSetRef = useRef<Set<number>>(new Set());
+  const currentSessionIdRef = useRef<string | null>(null);
 
   // Instantiate the accumulator
   const accumulatorRef = useRef(
@@ -37,7 +38,8 @@ export const MultiQRScanner: React.FC<MultiQRScannerProps> = ({ onComplete, onCa
         const index = parsed.i;
 
         // If we switch to a new session, reset state
-        if (currentSessionId !== sid) {
+        if (currentSessionIdRef.current !== sid) {
+          currentSessionIdRef.current = sid;
           setCurrentSessionId(sid);
           scannedSetRef.current.clear();
         }
