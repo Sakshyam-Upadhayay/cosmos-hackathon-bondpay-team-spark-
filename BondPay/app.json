@@ -1,52 +1,39 @@
 {
   "expo": {
     "name": "BondPay",
-    "slug": "bondpay",
+    "slug": "BondPay",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "assetBundlePatterns": ["**/*"],
     "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.bondpay.app"
+      "supportsTablet": true
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "package": "com.bondpay.app",
+      "predictiveBackGestureEnabled": false,
       "permissions": [
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_SCAN",
-        "android.permission.BLUETOOTH_ADVERTISE",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.CAMERA"
-      ]
+      ],
+      "package": "com.anonymous.BondPay"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow BondPay to access your camera for QR code scanning."
-        }
-      ],
-      [
-        "expo-secure-store",
-        {}
-      ],
-      [
-        "expo-sqlite",
-        {}
-      ]
-    ]
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-font"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "bf6260bf-39cf-45ea-b946-faf793e5cdb1"
+      }
+    }
   }
 }
