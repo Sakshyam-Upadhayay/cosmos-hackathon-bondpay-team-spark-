@@ -77,6 +77,25 @@ app.get('/db-test', async (req, res) => {
   }
 });
 
+app.get('/schema-test', async (req, res) => {
+  try {
+    const tables = ['users', 'issued_bonds', 'transactions', 'bond_redemptions', 'sync_batches'];
+    const result: any = {};
+    for (const table of tables) {
+      const dbRes = await query(`
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = $1
+      `, [table]);
+      result[table] = dbRes.rows;
+    }
+    res.status(200).json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || err });
+  }
+});
+
+
 const startServer = async () => {
   try {
     await CryptoService.init();

@@ -71,6 +71,24 @@ app.get('/db-test', async (req, res) => {
         res.status(500).json({ success: false, error: err.message || err, message: 'Failed to connect to database. Check your DATABASE_URL environment variable!' });
     }
 });
+app.get('/schema-test', async (req, res) => {
+    try {
+        const tables = ['users', 'issued_bonds', 'transactions', 'bond_redemptions', 'sync_batches'];
+        const result = {};
+        for (const table of tables) {
+            const dbRes = await (0, db_1.query)(`
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = $1
+      `, [table]);
+            result[table] = dbRes.rows;
+        }
+        res.status(200).json(result);
+    }
+    catch (err) {
+        res.status(500).json({ error: err.message || err });
+    }
+});
 const startServer = async () => {
     try {
         await crypto_service_1.CryptoService.init();
