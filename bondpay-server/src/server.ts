@@ -60,6 +60,8 @@ app.get('/server/config', async (req, res) => {
   }
 });
 
+
+
 import { query } from './database/db';
 
 app.get('/health', (req, res) => {
