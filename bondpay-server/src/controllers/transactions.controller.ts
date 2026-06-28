@@ -81,8 +81,8 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
               break;
             }
 
-            // Verify server signature
-            const dataToVerify = `${bond.bondId}${bond.value}${bond.ownerId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
+            // Verify server signature using original owner (senderId)
+            const dataToVerify = `${bond.bondId}${bond.value}${transaction.senderId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
             const isValid = await CryptoService.verifySignature(dataToVerify, bond.serverSignature, CryptoService.getPublicKeyBase64());
             
             if (!isValid) {
@@ -200,8 +200,8 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
               break;
             }
 
-            // Verify server signature
-            const dataToVerify = `${bond.bondId}${bond.value}${bond.ownerId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
+            // Verify server signature using original owner (senderId)
+            const dataToVerify = `${bond.bondId}${bond.value}${transaction.senderId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
             const isValid = await CryptoService.verifySignature(dataToVerify, bond.serverSignature, CryptoService.getPublicKeyBase64());
             
             if (!isValid) {

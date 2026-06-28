@@ -66,8 +66,8 @@ const syncTransactions = async (req, res) => {
                             allBondsValid = false;
                             break;
                         }
-                        // Verify server signature
-                        const dataToVerify = `${bond.bondId}${bond.value}${bond.ownerId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
+                        // Verify server signature using original owner (senderId)
+                        const dataToVerify = `${bond.bondId}${bond.value}${transaction.senderId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
                         const isValid = await crypto_service_1.CryptoService.verifySignature(dataToVerify, bond.serverSignature, crypto_service_1.CryptoService.getPublicKeyBase64());
                         if (!isValid) {
                             rejected.push({ txId: transaction.txId, bondIds, reason: 'INVALID_SERVER_SIGNATURE' });
@@ -156,8 +156,8 @@ const syncTransactions = async (req, res) => {
                             allBondsValid = false;
                             break;
                         }
-                        // Verify server signature
-                        const dataToVerify = `${bond.bondId}${bond.value}${bond.ownerId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
+                        // Verify server signature using original owner (senderId)
+                        const dataToVerify = `${bond.bondId}${bond.value}${transaction.senderId}${bond.issuedAt}${bond.expiresAt}${bond.issuedByServer}`;
                         const isValid = await crypto_service_1.CryptoService.verifySignature(dataToVerify, bond.serverSignature, crypto_service_1.CryptoService.getPublicKeyBase64());
                         if (!isValid) {
                             rejected.push({ txId: transaction.txId, bondIds, reason: 'INVALID_SERVER_SIGNATURE' });

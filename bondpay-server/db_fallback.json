@@ -1,0 +1,47 @@
+{
+  "users": [],
+  "issued_bonds": [],
+  "transactions": [],
+  "pending_pickups": [],
+  "bond_redemptions": [],
+  "sync_batches": [
+    {
+      "batch_id": "test-batch-id-12345",
+      "user_id": "e6a88ab4-3d0a-4299-92c9-df7f6b653aef",
+      "submitted_at": "2026-06-28T07:37:26.453Z",
+      "processed_at": "2026-06-28T07:37:26.453Z",
+      "result": {
+        "accepted": [],
+        "rejected": [
+          {
+            "txId": "TX-12345",
+            "reason": "Sender public key not found"
+          }
+        ],
+        "flagged": []
+      }
+    }
+  ],
+  "system_config": [
+    {
+      "config_key": "min_denomination",
+      "config_value": "5"
+    },
+    {
+      "config_key": "max_offline_capacity",
+      "config_value": "10000"
+    },
+    {
+      "config_key": "qr_switching_delay",
+      "config_value": "333"
+    },
+    {
+      "config_key": "max_bonds_per_request",
+      "config_value": "50"
+    },
+    {
+      "config_key": "bond_ttl_days",
+      "config_value": "30"
+    }
+  ]
+}
