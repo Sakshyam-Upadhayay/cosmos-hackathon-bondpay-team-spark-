@@ -363,3 +363,42 @@ export const query = async (text: string, params?: any[]) => {
     throw err;
   }
 };
+
+export const withTransaction = async <T>(
+  callback: (txQuery: (text: string, params?: any[]) => Promise<any>) => Promise<T>
+): Promise<T> => {
+  let client: any;
+  try {
+    client = await pool.connect();
+  } catch (err: any) {
+    const isConnErr = err.code === 'ENOTFOUND' || err.code === 'ECONNREFUSED' || err.message.includes('connect');
+    if (isConnErr) {
+      // Fallback: run inside a mock transaction
+      const mockTxQuery = async (text: string, params?: any[]) => {
+        return runMockQuery(text, params);
+      };
+      return await callback(mockTxQuery);
+    }
+    throw err;
+  }
+
+  try {
+    await client.query('BEGIN');
+    const txQuery = async (text: string, params?: any[]) => {
+      return client.query(text, params);
+    };
+    const result = await callback(txQuery);
+    await client.query('COMMIT');
+    return result;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch (rollbackErr) {
+      console.error('Failed to rollback transaction:', rollbackErr);
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+

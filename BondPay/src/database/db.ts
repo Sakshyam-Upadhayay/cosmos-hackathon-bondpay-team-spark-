@@ -12,6 +12,22 @@ export const getDB = async () => {
 export const initDB = async () => {
   const database = await getDB();
   
+  // Check if existing database has the outdated 'current_owner_id' column
+  try {
+    const info = await database.getAllAsync("PRAGMA table_info(bonds)") as any[];
+    const hasCurrentOwnerId = info.some((col: any) => col.name === 'current_owner_id');
+    if (hasCurrentOwnerId) {
+      console.log('Outdated SQLite schema detected (found current_owner_id). Dropping tables to migrate to the current schema...');
+      await database.execAsync(`
+        DROP TABLE IF EXISTS transaction_bonds;
+        DROP TABLE IF EXISTS transactions;
+        DROP TABLE IF EXISTS bonds;
+      `);
+    }
+  } catch (e) {
+    console.error('Failed to run schema migration check:', e);
+  }
+
   await database.execAsync(`
     CREATE TABLE IF NOT EXISTS bonds (
       bond_id           TEXT PRIMARY KEY,

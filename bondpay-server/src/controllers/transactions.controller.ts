@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { query } from '../database/db';
+import { query, withTransaction } from '../database/db';
 import { CryptoService } from '../services/crypto.service';
 import { refundExpiredBondsForUser } from './bonds.controller';
 
@@ -28,8 +28,7 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
     const rejected: any[] = [];
     const flagged: any[] = [];
 
-    await query('BEGIN');
-    try {
+    const resultPayload = await withTransaction(async (txQuery) => {
       // Process Incoming (user is the receiver)
       if (incoming && Array.isArray(incoming)) {
         for (const item of incoming) {
@@ -57,7 +56,7 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
           const bondIdsString = bondIds.join(',');
 
           // 2. Verify Sender Signature
-          const senderRes = await query('SELECT public_key FROM users WHERE user_id = $1', [transaction.senderId]);
+          const senderRes = await txQuery('SELECT public_key FROM users WHERE user_id = $1', [transaction.senderId]);
           if (senderRes.rows.length === 0 || !senderRes.rows[0].public_key) {
             rejected.push({ txId: transaction.txId, reason: 'Sender public key not found' });
             continue;
@@ -93,7 +92,7 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
             }
 
             // Check if bond was issued and verify ownership
-            const issuedCheck = await query('SELECT status, owner_id FROM issued_bonds WHERE bond_id = $1', [bond.bondId]);
+            const issuedCheck = await txQuery('SELECT status, owner_id FROM issued_bonds WHERE bond_id = $1', [bond.bondId]);
             if (issuedCheck.rows.length === 0) {
               rejected.push({ txId: transaction.txId, bondIds, reason: 'BOND_NOT_ISSUED' });
               allBondsValid = false;
@@ -107,13 +106,13 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
             }
 
             // Check redemption ledger (Double spend)
-            const redCheck = await query('SELECT tx_id FROM bond_redemptions WHERE bond_id = $1', [bond.bondId]);
+            const redCheck = await txQuery('SELECT tx_id FROM bond_redemptions WHERE bond_id = $1', [bond.bondId]);
             if (redCheck.rows.length > 0) {
               flagged.push({ txId: transaction.txId, bondIds, reason: 'DOUBLE_SPEND_DETECTED' });
               allBondsValid = false;
               
               // Record fraud flag
-              await query(
+              await txQuery(
                 `INSERT INTO fraud_flags (user_id, tx_id, bond_id, flag_type, severity) VALUES ($1, $2, $3, $4, $5)`,
                 [transaction.senderId, transaction.txId, bond.bondId, 'DOUBLE_SPEND', 'HIGH']
               );
@@ -123,22 +122,22 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
 
           if (allBondsValid) {
             // Check if transaction was already inserted
-            const txCheck = await query('SELECT tx_id FROM transactions WHERE tx_id = $1', [transaction.txId]);
+            const txCheck = await txQuery('SELECT tx_id FROM transactions WHERE tx_id = $1', [transaction.txId]);
             if (txCheck.rows.length === 0) {
               // Mark bonds as redeemed
               for (const bond of bonds) {
-                await query(
+                await txQuery(
                   `INSERT INTO bond_redemptions (bond_id, tx_id, redeemed_by, redeemed_from, batch_id) VALUES ($1, $2, $3, $4, $5)`,
                   [bond.bondId, transaction.txId, userId, transaction.senderId, batchId]
                 );
-                await query('UPDATE issued_bonds SET status = $1 WHERE bond_id = $2', ['redeemed', bond.bondId]);
+                await txQuery('UPDATE issued_bonds SET status = $1 WHERE bond_id = $2', ['redeemed', bond.bondId]);
               }
 
               // Credit receiver
-              await query('UPDATE users SET online_balance = online_balance + $1 WHERE user_id = $2', [transaction.totalAmount, userId]);
+              await txQuery('UPDATE users SET online_balance = online_balance + $1 WHERE user_id = $2', [transaction.totalAmount, userId]);
               
               // Record transaction
-              await query(
+              await txQuery(
                 `INSERT INTO transactions (tx_id, tx_type, sender_id, receiver_id, total_amount, tx_timestamp, nonce, sender_signature, message, is_offline)
                  VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8, $9, $10)`,
                 [transaction.txId, 'P2P_OFFLINE', transaction.senderId, transaction.receiverId, transaction.totalAmount, transaction.timestamp, transaction.nonce, transaction.senderSignature, transaction.message || null, true]
@@ -176,7 +175,7 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
           const bondIdsString = bondIds.join(',');
 
           // Verify Sender Signature
-          const senderRes = await query('SELECT public_key FROM users WHERE user_id = $1', [userId]);
+          const senderRes = await txQuery('SELECT public_key FROM users WHERE user_id = $1', [userId]);
           if (senderRes.rows.length === 0 || !senderRes.rows[0].public_key) {
             rejected.push({ txId: transaction.txId, reason: 'Sender public key not found' });
             continue;
@@ -212,7 +211,7 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
             }
 
             // Check issued
-            const issuedCheck = await query('SELECT status, owner_id FROM issued_bonds WHERE bond_id = $1', [bond.bondId]);
+            const issuedCheck = await txQuery('SELECT status, owner_id FROM issued_bonds WHERE bond_id = $1', [bond.bondId]);
             if (issuedCheck.rows.length === 0) {
               rejected.push({ txId: transaction.txId, bondIds, reason: 'BOND_NOT_ISSUED' });
               allBondsValid = false;
@@ -226,12 +225,12 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
             }
 
             // Check double spend
-            const redCheck = await query('SELECT tx_id FROM bond_redemptions WHERE bond_id = $1', [bond.bondId]);
+            const redCheck = await txQuery('SELECT tx_id FROM bond_redemptions WHERE bond_id = $1', [bond.bondId]);
             if (redCheck.rows.length > 0) {
               flagged.push({ txId: transaction.txId, bondIds, reason: 'DOUBLE_SPEND_DETECTED' });
               allBondsValid = false;
               
-              await query(
+              await txQuery(
                 `INSERT INTO fraud_flags (user_id, tx_id, bond_id, flag_type, severity) VALUES ($1, $2, $3, $4, $5)`,
                 [userId, transaction.txId, bond.bondId, 'DOUBLE_SPEND', 'HIGH']
               );
@@ -240,22 +239,22 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
           }
 
           if (allBondsValid) {
-            const txCheck = await query('SELECT tx_id FROM transactions WHERE tx_id = $1', [transaction.txId]);
+            const txCheck = await txQuery('SELECT tx_id FROM transactions WHERE tx_id = $1', [transaction.txId]);
             if (txCheck.rows.length === 0) {
               // Mark bonds as redeemed
               for (const bond of bonds) {
-                await query(
+                await txQuery(
                   `INSERT INTO bond_redemptions (bond_id, tx_id, redeemed_by, redeemed_from, batch_id) VALUES ($1, $2, $3, $4, $5)`,
                   [bond.bondId, transaction.txId, transaction.receiverId, userId, batchId]
                 );
-                await query('UPDATE issued_bonds SET status = $1 WHERE bond_id = $2', ['redeemed', bond.bondId]);
+                await txQuery('UPDATE issued_bonds SET status = $1 WHERE bond_id = $2', ['redeemed', bond.bondId]);
               }
 
               // Credit receiver
-              await query('UPDATE users SET online_balance = online_balance + $1 WHERE user_id = $2', [transaction.totalAmount, transaction.receiverId]);
+              await txQuery('UPDATE users SET online_balance = online_balance + $1 WHERE user_id = $2', [transaction.totalAmount, transaction.receiverId]);
               
               // Record transaction
-              await query(
+              await txQuery(
                 `INSERT INTO transactions (tx_id, tx_type, sender_id, receiver_id, total_amount, tx_timestamp, nonce, sender_signature, message, is_offline)
                  VALUES ($1, $2, $3, $4, $5, to_timestamp($6), $7, $8, $9, $10)`,
                 [transaction.txId, 'P2P_OFFLINE', userId, transaction.receiverId, transaction.totalAmount, transaction.timestamp, transaction.nonce, transaction.senderSignature, transaction.message || null, true]
@@ -267,28 +266,24 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
         }
       }
 
-      const resultPayload = { accepted, rejected, flagged };
+      const payload = { accepted, rejected, flagged };
       
       // Save batch result
-      await query(
+      await txQuery(
         `INSERT INTO sync_batches (batch_id, user_id, submitted_at, processed_at, result) VALUES ($1, $2, NOW(), NOW(), $3)`,
-        [batchId, userId, resultPayload]
+        [batchId, userId, payload]
       );
 
-      await query('COMMIT');
-
       // Get updated balance
-      const balanceResult = await query('SELECT online_balance FROM users WHERE user_id = $1', [userId]);
+      const balanceResult = await txQuery('SELECT online_balance FROM users WHERE user_id = $1', [userId]);
       
-      res.status(200).json({
-        ...resultPayload,
+      return {
+        ...payload,
         updatedOnlineBalance: parseInt(balanceResult.rows[0].online_balance, 10)
-      });
+      };
+    });
 
-    } catch (e) {
-      await query('ROLLBACK');
-      throw e;
-    }
+    res.status(200).json(resultPayload);
   } catch (error) {
     console.error('Sync error:', error);
     res.status(500).json({ error: 'Internal server error' });

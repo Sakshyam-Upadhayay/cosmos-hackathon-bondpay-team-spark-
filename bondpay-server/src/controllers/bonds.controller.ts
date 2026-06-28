@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { query } from '../database/db';
+import { query, withTransaction } from '../database/db';
 import { CryptoService } from '../services/crypto.service';
 import { v4 as uuidv4 } from 'uuid';
 import { config, limits } from '../config';
@@ -107,7 +107,7 @@ export const issueBonds = async (req: Request, res: Response): Promise<void> => 
       return;
     }
 
-    const bonds = [];
+    const bonds: any[] = [];
     const now = Math.floor(Date.now() / 1000);
     const expiresAt = now + (bondTtlDays * 24 * 60 * 60);
 
@@ -131,12 +131,11 @@ export const issueBonds = async (req: Request, res: Response): Promise<void> => 
     }
 
     // Insert to DB and deduct balance
-    await query('BEGIN');
-    try {
-      await query('UPDATE users SET online_balance = online_balance - $1 WHERE user_id = $2', [totalAmount, userId]);
+    await withTransaction(async (txQuery) => {
+      await txQuery('UPDATE users SET online_balance = online_balance - $1 WHERE user_id = $2', [totalAmount, userId]);
       
       for (const bond of bonds) {
-        await query(
+        await txQuery(
           `INSERT INTO issued_bonds (bond_id, value, owner_id, issued_at, expires_at, server_key_version, server_signature)
            VALUES ($1, $2, $3, to_timestamp($4), to_timestamp($5), $6, $7)`,
           [bond.bondId, bond.value, bond.ownerId, bond.issuedAt, bond.expiresAt, bond.issuedByServer, bond.serverSignature]
@@ -144,17 +143,12 @@ export const issueBonds = async (req: Request, res: Response): Promise<void> => 
       }
 
       const txId = 'BONDLOAD-' + uuidv4();
-      await query(
+      await txQuery(
         `INSERT INTO transactions (tx_id, tx_type, sender_id, total_amount, tx_timestamp, status, is_offline)
          VALUES ($1, $2, $3, $4, NOW(), 'accepted', false)`,
          [txId, 'BOND_LOAD', userId, totalAmount]
       );
-      
-      await query('COMMIT');
-    } catch (e) {
-      await query('ROLLBACK');
-      throw e;
-    }
+    });
 
     // Return bonds and updated balance
     res.status(200).json({
@@ -168,43 +162,41 @@ export const issueBonds = async (req: Request, res: Response): Promise<void> => 
 };
 
 export const refundExpiredBondsForUser = async (userId: string): Promise<number> => {
-  await query('BEGIN');
   try {
-    const expiredRes = await query(
-      `SELECT COALESCE(SUM(value), 0) AS total_expired 
-       FROM issued_bonds 
-       WHERE owner_id = $1 AND status = 'active' AND expires_at <= NOW()`,
-      [userId]
-    );
-    const refundAmount = parseInt(expiredRes.rows[0].total_expired, 10);
-
-    if (refundAmount > 0) {
-      await query(
-        `UPDATE issued_bonds 
-         SET status = 'expired' 
+    return await withTransaction(async (txQuery) => {
+      const expiredRes = await txQuery(
+        `SELECT COALESCE(SUM(value), 0) AS total_expired 
+         FROM issued_bonds 
          WHERE owner_id = $1 AND status = 'active' AND expires_at <= NOW()`,
         [userId]
       );
+      const refundAmount = parseInt(expiredRes.rows[0].total_expired, 10);
 
-      await query(
-        `UPDATE users 
-         SET online_balance = online_balance + $1 
-         WHERE user_id = $2`,
-        [refundAmount, userId]
-      );
-      
-      const txId = 'BONDREFUND-' + uuidv4();
-      await query(
-        `INSERT INTO transactions (tx_id, tx_type, sender_id, total_amount, tx_timestamp, status, is_offline)
-         VALUES ($1, $2, $3, $4, NOW(), 'accepted', false)`,
-         [txId, 'BOND_REFUND', userId, refundAmount]
-      );
-    }
-    
-    await query('COMMIT');
-    return refundAmount;
+      if (refundAmount > 0) {
+        await txQuery(
+          `UPDATE issued_bonds 
+           SET status = 'expired' 
+           WHERE owner_id = $1 AND status = 'active' AND expires_at <= NOW()`,
+          [userId]
+        );
+
+        await txQuery(
+          `UPDATE users 
+           SET online_balance = online_balance + $1 
+           WHERE user_id = $2`,
+          [refundAmount, userId]
+        );
+        
+        const txId = 'BONDREFUND-' + uuidv4();
+        await txQuery(
+          `INSERT INTO transactions (tx_id, tx_type, sender_id, total_amount, tx_timestamp, status, is_offline)
+           VALUES ($1, $2, $3, $4, NOW(), 'accepted', false)`,
+           [txId, 'BOND_REFUND', userId, refundAmount]
+        );
+      }
+      return refundAmount;
+    });
   } catch (e) {
-    await query('ROLLBACK');
     console.error('Failed to refund expired bonds:', e);
     return 0;
   }
