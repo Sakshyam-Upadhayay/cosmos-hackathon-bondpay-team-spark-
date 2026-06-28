@@ -218,12 +218,8 @@ export class SyncService {
           }
         }
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to fetch online balance:', error);
-      if (error.response?.status === 401) {
-        SecureStore.deleteItemAsync('bondpay_session').catch(() => {});
-        useAppStore.getState().logout();
-      }
     }
   }
 
@@ -261,12 +257,8 @@ export class SyncService {
         await db.execAsync('ROLLBACK');
         throw e;
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('Failed to fetch bonds:', error);
-      if (error.response?.status === 401) {
-        SecureStore.deleteItemAsync('bondpay_session').catch(() => {});
-        useAppStore.getState().logout();
-      }
     }
   }
 }

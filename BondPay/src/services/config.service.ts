@@ -1,17 +1,7 @@
 import axios from 'axios';
 import * as SecureStore from 'expo-secure-store';
-import Constants from 'expo-constants';
 
-const getLocalApiUrl = () => {
-  const hostUri = Constants.expoConfig?.hostUri || '';
-  const localIp = hostUri.split(':')[0];
-  if (localIp) {
-    return `http://${localIp}:3000`;
-  }
-  return 'https://zenithkandel.com.np/bondpay';
-};
-
-export const API_URL = getLocalApiUrl();
+export const API_URL = 'https://zenithkandel.com.np/bondpay';
 
 export interface SystemConfig {
   min_denomination: number;
