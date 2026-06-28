@@ -284,8 +284,8 @@ export const syncTransactions = async (req: Request, res: Response): Promise<voi
     });
 
     res.status(200).json(resultPayload);
-  } catch (error) {
+  } catch (error: any) {
     console.error('Sync error:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    res.status(500).json({ error: error.message || error, stack: error.stack });
   }
 };
